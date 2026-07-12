@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+*.db
+*.db-shm
+*.db-wal
+.env
+*.log
+.DS_Store
+
+router.config.yaml

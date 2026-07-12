@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "model-router": {
+      "command": "node",
+      "args": ["${pluginRoot}/dist/mcp-server/index.js"]
+    }
+  }
+}

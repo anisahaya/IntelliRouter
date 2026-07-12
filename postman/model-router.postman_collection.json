@@ -1,0 +1,177 @@
+{
+  "info": {
+    "name": "Intelligent Model Router",
+    "description": "Local compatibility and control API checks. Uses mock credentials only.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [{ "key": "routeId", "value": "" }],
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": "{{baseUrl}}/healthz" },
+      "event": [
+        {
+          "listen": "test",
+          "script": { "exec": ["pm.test('healthy', () => pm.response.to.have.status(200));"] }
+        }
+      ]
+    },
+    {
+      "name": "Models",
+      "request": { "method": "GET", "url": "{{baseUrl}}/v1/models" },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": ["pm.test('models', () => pm.expect(pm.response.json().data.length).above(0));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dry-run route",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"task\":\"review this TypeScript function\",\"profile\":\"balanced\"}"
+        },
+        "url": "{{baseUrl}}/router/route"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('routed', () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('routeId', pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat Completions",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"model\":\"auto\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}"
+        },
+        "url": "{{baseUrl}}/v1/chat/completions"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('chat', () => pm.expect(pm.response.json().object).eql('chat.completion'));",
+              "pm.test('router headers', () => pm.expect(pm.response.headers.get('x-router-model')).not.empty);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Responses",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"model\":\"auto\",\"input\":\"hello\"}" },
+        "url": "{{baseUrl}}/v1/responses"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('response', () => pm.expect(pm.response.json().object).eql('response'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Anthropic Messages",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"model\":\"auto\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}"
+        },
+        "url": "{{baseUrl}}/v1/messages"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": ["pm.test('message', () => pm.expect(pm.response.json().type).eql('message'));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Route explanation",
+      "request": { "method": "GET", "url": "{{baseUrl}}/router/routes/{{routeId}}" },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('explained', () => pm.expect(pm.response.json().candidates.length).above(0));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Feedback",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"routeId\":\"{{routeId}}\",\"outcome\":\"success\",\"tags\":[\"postman\"]}"
+        },
+        "url": "{{baseUrl}}/router/feedback"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": { "exec": ["pm.test('accepted', () => pm.response.to.have.status(202));"] }
+        }
+      ]
+    },
+    {
+      "name": "Stats",
+      "request": { "method": "GET", "url": "{{baseUrl}}/router/stats" },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('stats', () => pm.expect(pm.response.json().totalRequests).above(0));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Router models",
+      "request": { "method": "GET", "url": "{{baseUrl}}/router/models" },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('router models', () => pm.expect(pm.response.json().profiles).include('balanced'));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

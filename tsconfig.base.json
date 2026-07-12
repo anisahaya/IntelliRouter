@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@model-router/contracts": ["packages/contracts/src/index.ts"],
+      "@model-router/config": ["packages/config/src/index.ts"],
+      "@model-router/router-core": ["packages/router-core/src/index.ts"],
+      "@model-router/providers": ["packages/providers/src/index.ts"],
+      "@model-router/telemetry": ["packages/telemetry/src/index.ts"]
+    }
+  }
+}

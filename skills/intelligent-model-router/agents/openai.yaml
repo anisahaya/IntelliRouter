@@ -1,0 +1,4 @@
+interface:
+  display_name: "Intelligent Model Router"
+  short_description: "Route and delegate tasks across local models"
+  default_prompt: "Use $intelligent-model-router to choose and delegate this task through my local router."

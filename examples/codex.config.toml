@@ -1,0 +1,10 @@
+# Merge into ~/.codex/config.toml. Codex intentionally ignores custom provider
+# definitions in project-local .codex/config.toml files.
+model = "auto"
+model_provider = "model_router"
+
+[model_providers.model_router]
+name = "Local Intelligent Model Router"
+base_url = "http://127.0.0.1:8856/v1"
+env_key = "MODEL_ROUTER_AUTH_TOKEN"
+wire_api = "responses"

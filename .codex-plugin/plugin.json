@@ -1,0 +1,25 @@
+{
+  "name": "model-router",
+  "version": "0.1.0",
+  "description": "Route and delegate coding tasks through a privacy-safe local model router.",
+  "author": {
+    "name": "Model Router contributors"
+  },
+  "license": "MIT",
+  "keywords": ["models", "routing", "mcp", "coding-agents"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Intelligent Model Router",
+    "shortDescription": "Choose and delegate across local model providers.",
+    "longDescription": "Use a local compatibility proxy and MCP tools to choose models, delegate bounded tasks, explain routing decisions, and record outcome feedback without storing raw prompts by default.",
+    "developerName": "Model Router contributors",
+    "category": "Developer Tools",
+    "capabilities": ["Model routing", "Bounded delegation", "Local telemetry"],
+    "defaultPrompt": [
+      "Choose the best model for this coding task.",
+      "Delegate this bounded task through my router.",
+      "Explain the last model routing decision."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

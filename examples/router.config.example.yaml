@@ -1,0 +1,55 @@
+server:
+  host: 127.0.0.1
+  port: 8856
+  authTokenEnv: MODEL_ROUTER_AUTH_TOKEN
+  databasePath: ~/.model-router/router.db
+
+privacy:
+  storePrompts: false
+  storeResponses: false
+  hashSessionIds: true
+
+models:
+  - id: cheap-code
+    provider: openai-compatible
+    upstreamModel: provider/model-a
+    baseUrl: https://provider.example/v1
+    apiKeyEnv: PROVIDER_A_API_KEY
+    quality: 0.65
+    cost: { inputPerMillion: 0.20, outputPerMillion: 0.80 }
+    capabilities:
+      protocols: [openai-chat, openai-responses]
+      tools: true
+      json: true
+      vision: false
+      streaming: true
+      maxContextTokens: 128000
+    tags: [cheap, fast, code]
+
+  - id: premium-code
+    provider: anthropic
+    upstreamModel: provider-model-b
+    baseUrl: https://api.anthropic.com
+    apiKeyEnv: PROVIDER_B_API_KEY
+    quality: 0.90
+    cost: { inputPerMillion: 3.00, outputPerMillion: 15.00 }
+    capabilities:
+      protocols: [anthropic-messages]
+      tools: true
+      json: true
+      vision: true
+      streaming: true
+      maxContextTokens: 200000
+    tags: [premium, reasoning, code]
+
+routing:
+  defaultProfile: balanced
+  affinityTtlSeconds: 3600
+  fallbackOn: [timeout, rate_limit, overloaded, upstream_5xx]
+  profiles:
+    economy:
+      weights: { quality: 0.20, cost: 0.55, latency: 0.25 }
+    balanced:
+      weights: { quality: 0.45, cost: 0.35, latency: 0.20 }
+    premium:
+      weights: { quality: 0.75, cost: 0.10, latency: 0.15 }
