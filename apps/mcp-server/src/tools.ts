@@ -3,7 +3,7 @@ import type { ProxyClient } from "./client.js";
 
 export const routeTaskInput = {
   task: z.string().min(1).max(32_000),
-  profile: z.enum(["economy", "balanced", "premium"]).default("balanced"),
+  profile: z.string().min(1).max(64).default("balanced"),
   protocol: z
     .enum(["openai-chat", "openai-responses", "anthropic-messages"])
     .default("openai-chat"),
@@ -11,6 +11,9 @@ export const routeTaskInput = {
   toolsRequired: z.boolean().default(false),
   jsonRequired: z.boolean().default(false),
   visionRequired: z.boolean().default(false),
+  streamingRequired: z.boolean().default(false),
+  minimumContextTokens: z.number().int().nonnegative().default(0),
+  expectedOutputTokens: z.number().int().nonnegative().default(0),
 };
 
 export const routeTaskOutput = {
@@ -18,8 +21,24 @@ export const routeTaskOutput = {
   selectedModel: z.string(),
   profile: z.string(),
   explanation: z.string(),
+  provider: z.string(),
+  upstreamModel: z.string(),
+  protocol: z.string(),
   candidates: z
-    .array(z.object({ modelId: z.string(), eligible: z.boolean(), total: z.number() }))
+    .array(
+      z.object({
+        modelId: z.string(),
+        eligible: z.boolean(),
+        exclusions: z.array(z.string()),
+        scores: z.object({
+          quality: z.number(),
+          cost: z.number(),
+          latency: z.number(),
+          feedback: z.number(),
+          total: z.number(),
+        }),
+      }),
+    )
     .max(32),
 };
 
@@ -35,6 +54,9 @@ export function createToolHandlers(client: ProxyClient) {
       toolsRequired: boolean;
       jsonRequired: boolean;
       visionRequired: boolean;
+      streamingRequired?: boolean;
+      minimumContextTokens?: number;
+      expectedOutputTokens?: number;
     }) => {
       const decision = await client.routeTask({
         task: input.task,
@@ -45,6 +67,9 @@ export function createToolHandlers(client: ProxyClient) {
           tools: input.toolsRequired,
           json: input.jsonRequired,
           vision: input.visionRequired,
+          streaming: input.streamingRequired ?? false,
+          minimumContextTokens:
+            (input.minimumContextTokens ?? 0) + (input.expectedOutputTokens ?? 0),
         },
       });
       const candidates = Array.isArray(decision.candidates)
@@ -54,7 +79,16 @@ export function createToolHandlers(client: ProxyClient) {
             return {
               modelId: String(item.modelId),
               eligible: Boolean(item.eligible),
-              total: Number(scores.total ?? 0),
+              exclusions: Array.isArray(item.exclusionReasons)
+                ? item.exclusionReasons.map(String)
+                : [],
+              scores: {
+                quality: Number(scores.quality ?? 0),
+                cost: Number(scores.cost ?? 0),
+                latency: Number(scores.latency ?? 0),
+                feedback: Number(scores.feedback ?? 0),
+                total: Number(scores.total ?? 0),
+              },
             };
           })
         : [];
@@ -64,9 +98,12 @@ export function createToolHandlers(client: ProxyClient) {
         selectedModel: String(decision.logicalModel),
         profile: String(decision.profile),
         explanation: winner
-          ? `${winner.modelId} selected with deterministic score ${winner.total.toFixed(4)}`
+          ? `${winner.modelId} selected with deterministic score ${winner.scores.total.toFixed(4)}`
           : `${String(decision.logicalModel)} selected`,
         candidates,
+        provider: String(decision.provider ?? "unknown"),
+        upstreamModel: String(decision.upstreamModel),
+        protocol: input.protocol,
       };
     },
     explainRoute: async (routeId: string) => ({ result: await client.explainRoute(routeId) }),
@@ -88,6 +125,7 @@ export function createToolHandlers(client: ProxyClient) {
       model?: string;
       session?: string;
       maxOutputTokens: number;
+      protocol?: "openai-chat" | "openai-responses" | "anthropic-messages";
     }) => ({ result: await client.delegate(input) }),
   };
 }

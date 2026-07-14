@@ -60,13 +60,20 @@ export async function startHarness() {
   const upstreamAddress = upstream.address();
   const upstreamUrl = `http://127.0.0.1:${upstreamAddress.port}`;
   const config = {
-    server: { host: "127.0.0.1", port: 0, databasePath: ":memory:", bodyLimitBytes: 2_097_152 },
+    server: { host: "127.0.0.1", port: 8856, databasePath: ":memory:", bodyLimitBytes: 2_097_152 },
     privacy: { storePrompts: false, storeResponses: false, hashSessionIds: true },
     models: [
       model("mock-openai", "openai-compatible", "mock-openai-upstream", `${upstreamUrl}/v1`, [
         "openai-chat",
         "openai-responses",
       ]),
+      model(
+        "mock-openai-fallback",
+        "openai-compatible",
+        "mock-openai-fallback-upstream",
+        `${upstreamUrl}/v1`,
+        ["openai-chat", "openai-responses"],
+      ),
       model("mock-anthropic", "anthropic", "mock-anthropic-upstream", upstreamUrl, [
         "anthropic-messages",
       ]),
@@ -74,7 +81,7 @@ export async function startHarness() {
     routing: {
       defaultProfile: "balanced",
       affinityTtlSeconds: 3600,
-      fallbackOn: ["timeout", "rate_limit", "overloaded", "upstream_5xx"],
+      fallbackOn: ["timeout", "network", "rate_limit", "overloaded", "upstream_5xx"],
       profiles: {
         economy: { weights: { quality: 0.2, cost: 0.55, latency: 0.25 } },
         balanced: { weights: { quality: 0.45, cost: 0.35, latency: 0.2 } },

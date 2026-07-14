@@ -10,7 +10,7 @@ privacy:
   hashSessionIds: true
 
 models:
-  - id: cheap-code
+  - id: fast-openai
     provider: openai-compatible
     upstreamModel: provider/model-a
     baseUrl: https://provider.example/v1
@@ -26,11 +26,27 @@ models:
       maxContextTokens: 128000
     tags: [cheap, fast, code]
 
-  - id: premium-code
-    provider: anthropic
-    upstreamModel: provider-model-b
-    baseUrl: https://api.anthropic.com
+  - id: reasoning-openai
+    provider: openai-compatible
+    upstreamModel: provider/model-b
+    baseUrl: https://provider.example/v1
     apiKeyEnv: PROVIDER_B_API_KEY
+    quality: 0.90
+    cost: { inputPerMillion: 2.00, outputPerMillion: 8.00 }
+    capabilities:
+      protocols: [openai-chat, openai-responses]
+      tools: true
+      json: true
+      vision: true
+      streaming: true
+      maxContextTokens: 128000
+    tags: [reasoning, code]
+
+  - id: anthropic-reasoning
+    provider: anthropic
+    upstreamModel: provider-model-c
+    baseUrl: https://api.anthropic.com
+    apiKeyEnv: PROVIDER_C_API_KEY
     quality: 0.90
     cost: { inputPerMillion: 3.00, outputPerMillion: 15.00 }
     capabilities:
@@ -45,7 +61,7 @@ models:
 routing:
   defaultProfile: balanced
   affinityTtlSeconds: 3600
-  fallbackOn: [timeout, rate_limit, overloaded, upstream_5xx]
+  fallbackOn: [timeout, network, rate_limit, overloaded, upstream_5xx]
   profiles:
     economy:
       weights: { quality: 0.20, cost: 0.55, latency: 0.25 }

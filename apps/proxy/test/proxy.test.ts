@@ -330,7 +330,7 @@ describe("compatibility proxy", () => {
     });
     expect(feedback.statusCode).toBe(202);
     const stats = await app.inject({ method: "GET", url: "/router/stats" });
-    expect(stats.json().totalRequests).toBeGreaterThanOrEqual(3);
+    expect(stats.json().totalRequests).toBeGreaterThanOrEqual(2);
   });
 
   it("serves health/model surfaces and bounded malformed errors", async () => {
@@ -348,6 +348,40 @@ describe("compatibility proxy", () => {
     });
     expect(oversized.statusCode).toBe(413);
     expect(oversized.body.length).toBeLessThan(1_024);
+  });
+
+  it("covers control discovery, missing resources, protocol dry-runs, and probes", async () => {
+    const models = await app.inject({ method: "GET", url: "/router/models" });
+    expect(models.statusCode).toBe(200);
+    expect(models.json().profiles).toContain("balanced");
+    expect(models.json().models[0].health.state).toBe("unknown");
+
+    const missingRoute = await app.inject({ method: "GET", url: "/router/routes/missing" });
+    expect(missingRoute.statusCode).toBe(404);
+    const missingModel = await app.inject({ method: "POST", url: "/router/models/missing/probe" });
+    expect(missingModel.statusCode).toBe(404);
+
+    const probe = await app.inject({ method: "POST", url: "/router/models/cheap/probe" });
+    expect(probe.statusCode).toBe(200);
+    expect(probe.json()).toMatchObject({ model: "cheap", healthy: true, status: 200 });
+
+    for (const protocol of ["openai-responses", "anthropic-messages"] as const) {
+      const dry = await app.inject({
+        method: "POST",
+        url: "/router/route",
+        payload: {
+          task: "inspect a diagram",
+          protocol,
+          requirements: {
+            vision: true,
+            streaming: true,
+            minimumContextTokens: 100,
+          },
+        },
+      });
+      expect(dry.statusCode).toBe(200);
+      expect(dry.json().protocol).toBe(protocol);
+    }
   });
 
   it("enforces configured bearer auth without echoing the token", async () => {

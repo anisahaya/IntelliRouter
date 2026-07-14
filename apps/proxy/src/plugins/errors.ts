@@ -5,7 +5,14 @@ import { ZodError } from "zod";
 
 export function installErrors(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
-    request.log.error({ err: error, headers: "[REDACTED]" }, "request failed");
+    request.log.error(
+      {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorCode: error instanceof UpstreamError ? "upstream_error" : "request_error",
+        status: error instanceof UpstreamError ? error.status : undefined,
+      },
+      "request failed",
+    );
     if (error instanceof UpstreamError) {
       return reply.code(error.status).send({
         error: {
@@ -36,7 +43,7 @@ export function installErrors(app: FastifyInstance): void {
     return reply.code(status).send({
       error: {
         code: status === 400 ? "routing_error" : "internal_error",
-        message,
+        message: status === 400 ? message : "internal router error",
         requestId: request.id,
       },
     });

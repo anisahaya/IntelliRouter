@@ -1,5 +1,5 @@
-import { loadConfig } from "@model-router/config";
-import type { RouterConfig } from "@model-router/contracts";
+import { loadConfig, validateEnvironment } from "@model-router/config";
+import { type RouterConfig, routerConfigSchema } from "@model-router/contracts";
 import { RoutingEngine } from "@model-router/router-core";
 import { TelemetryStore } from "@model-router/telemetry";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -30,12 +30,25 @@ export interface BuildAppOptions {
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const env = options.env ?? process.env;
-  const config = options.config ?? (await loadConfig(options.configPath, { env }));
+  const config = options.config
+    ? routerConfigSchema.parse(options.config)
+    : await loadConfig(options.configPath, { env });
+  validateEnvironment(config, env);
+  for (const model of config.models.filter((item) => item.enabled)) {
+    if (
+      /\.example(?:\/|$)|provider\/model|provider-model/i.test(
+        `${model.baseUrl} ${model.upstreamModel}`,
+      )
+    ) {
+      throw new Error(`enabled model ${model.id} uses placeholder provider configuration`);
+    }
+  }
   const store = options.store ?? new TelemetryStore(config.server.databasePath);
+  store.configureHealth(config.routing.health);
   const engine = new RoutingEngine(
     config,
     store,
-    env.MODEL_ROUTER_SESSION_SALT ?? "local-router-salt",
+    env.MODEL_ROUTER_SESSION_SALT ?? store.sessionSalt(),
   );
   const runtime: RouterRuntime = { config, store, engine, env };
   const app = Fastify({

@@ -1,8 +1,11 @@
 export type ErrorClass =
   | "timeout"
+  | "network"
   | "rate_limit"
   | "overloaded"
   | "upstream_5xx"
+  | "auth"
+  | "model_not_found"
   | "client"
   | "unknown";
 

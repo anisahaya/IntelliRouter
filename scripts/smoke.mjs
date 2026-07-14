@@ -64,7 +64,7 @@ try {
   const cliRoute = await cli("route", "--task", "bounded CLI smoke", "--profile", "balanced");
   assert.equal((await cli("explain", cliRoute.id)).id, cliRoute.id);
   assert.equal((await cli("feedback", cliRoute.id, "--outcome", "success")).accepted, true);
-  assert.ok((await cli("stats")).totalRequests >= 5);
+  assert.ok((await cli("stats")).totalRequests >= 4);
   process.stdout.write(
     "smoke: chat, streaming, responses, messages, routing, explanation, feedback, stats, CLI passed\n",
   );

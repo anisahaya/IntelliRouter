@@ -37,8 +37,11 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   classifyError(error: unknown, response?: Response): ErrorClass {
     if (error instanceof DOMException && error.name === "AbortError") return "timeout";
+    if (!response && error instanceof TypeError) return "network";
     if (!response) return "unknown";
     if (response.status === 429) return "rate_limit";
+    if (response.status === 401 || response.status === 403) return "auth";
+    if (response.status === 404) return "model_not_found";
     if (response.status === 529) return "overloaded";
     if (response.status >= 500) return "upstream_5xx";
     if (response.status >= 400) return "client";

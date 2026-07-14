@@ -1,8 +1,12 @@
 import { controlRequest } from "./http.js";
 
-export function getStats(since?: string): Promise<unknown> {
+export function getStats(since?: string, model?: string, task?: string): Promise<unknown> {
   const normalized = since ? normalizeSince(since) : undefined;
-  const query = normalized ? `?since=${encodeURIComponent(normalized)}` : "";
+  const params = new URLSearchParams();
+  if (normalized) params.set("since", normalized);
+  if (model) params.set("model", model);
+  if (task) params.set("task", task);
+  const query = params.size ? `?${params}` : "";
   return controlRequest(`/router/stats${query}`);
 }
 

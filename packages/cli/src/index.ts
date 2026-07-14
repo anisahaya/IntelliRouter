@@ -24,16 +24,45 @@ program
   .command("route")
   .requiredOption("--task <task>")
   .option("--profile <profile>", "routing profile", "balanced")
-  .action(async (options) => print(await routeTask(options.task, options.profile)));
+  .option("--protocol <protocol>", "request protocol", "openai-chat")
+  .option("--session <session>")
+  .option("--model <model>")
+  .option("--tools")
+  .option("--json")
+  .option("--vision")
+  .option("--streaming")
+  .option("--minimum-context <tokens>", "minimum context tokens", Number)
+  .action(async (options) =>
+    print(
+      await routeTask(options.task, options.profile, {
+        protocol: options.protocol,
+        session: options.session,
+        model: options.model,
+        requirements: {
+          tools: options.tools,
+          json: options.json,
+          vision: options.vision,
+          streaming: options.streaming,
+          minimumContextTokens: options.minimumContext,
+        },
+      }),
+    ),
+  );
 program.command("explain <route-id>").action(async (id) => print(await explainRoute(id)));
 program
   .command("stats")
   .option("--since <time>")
-  .action(async (options) => print(await getStats(options.since)));
+  .option("--model <model>")
+  .option("--task <task>")
+  .action(async (options) => print(await getStats(options.since, options.model, options.task)));
 program
   .command("feedback <route-id>")
   .requiredOption("--outcome <outcome>")
-  .action(async (id, options) => print(await submitFeedback(id, options.outcome)));
+  .option("--score <score>", "score from 0 to 1", Number)
+  .option("--tag <tag...>")
+  .action(async (id, options) =>
+    print(await submitFeedback(id, options.outcome, options.score, options.tag ?? [])),
+  );
 program
   .command("config")
   .command("init [path]")

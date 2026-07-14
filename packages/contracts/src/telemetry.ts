@@ -11,8 +11,13 @@ export type FeedbackEvent = z.infer<typeof feedbackEventSchema>;
 export interface RouteStats {
   totalRequests: number;
   successfulRequests: number;
+  failedRequests: number;
+  canceledRequests: number;
+  totalAttempts: number;
+  fallbackAttempts: number;
   estimatedCostUsd: number;
   averageLatencyMs: number;
   byModel: Record<string, number>;
   byTask: Record<string, number>;
+  byOutcome: Record<string, number>;
 }

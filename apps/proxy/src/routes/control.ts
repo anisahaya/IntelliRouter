@@ -34,6 +34,7 @@ export function registerControl(app: FastifyInstance, runtime: RouterRuntime): v
       profile: input.profile,
       pinnedModel: input.model,
       sessionId: input.session,
+      kind: "dry_run",
     });
   });
 
@@ -66,6 +67,7 @@ export function registerControl(app: FastifyInstance, runtime: RouterRuntime): v
       capabilities: model.capabilities,
       tags: model.tags,
       healthy: runtime.store.isHealthy(model.id),
+      health: runtime.store.healthStatus(model.id),
     })),
   }));
 
@@ -85,8 +87,7 @@ export function registerControl(app: FastifyInstance, runtime: RouterRuntime): v
         prepared,
         AbortSignal.timeout(Math.min(model.timeoutMs, 10_000)),
       );
-      const healthy =
-        response.ok || (response.status >= 400 && response.status < 500 && response.status !== 429);
+      const healthy = response.ok;
       runtime.store.setHealth(model.id, healthy, performance.now() - started);
       await response.body?.cancel();
       return reply
@@ -118,7 +119,15 @@ function taskRequest(
     visionRequired: requirements.vision ?? false,
     estimatedInputTokens: Math.ceil(task.length / 4),
     minimumContextTokens: requirements.minimumContextTokens ?? 0,
-    passThroughBody: { model: "auto" },
+    passThroughBody:
+      protocol === "openai-responses"
+        ? { model: "auto", input: task, max_output_tokens: 1, stream: false }
+        : {
+            model: "auto",
+            messages: [{ role: "user", content: task }],
+            max_tokens: 1,
+            stream: false,
+          },
   };
   return protocol === "openai-responses"
     ? { ...common, protocol, metadata: { inputKind: "string" } }

@@ -3,8 +3,23 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["apps/**/test/**/*.test.ts", "packages/**/test/**/*.test.ts"],
-    coverage: { reporter: ["text", "json"] },
+    include: [
+      "apps/**/test/**/*.test.ts",
+      "packages/**/test/**/*.test.ts",
+      "skills/**/test/**/*.test.ts",
+    ],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json"],
+      include: ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts"],
+      exclude: [
+        "apps/proxy/src/server.ts",
+        "apps/mcp-server/src/index.ts",
+        "packages/cli/src/index.ts",
+        "packages/cli/src/serve.ts",
+      ],
+      thresholds: { statements: 80, lines: 80, functions: 80, branches: 70 },
+    },
     testTimeout: 10_000,
   },
   resolve: {
