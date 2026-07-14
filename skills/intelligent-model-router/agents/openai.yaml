@@ -1,4 +1,4 @@
 interface:
   display_name: "Intelligent Model Router"
-  short_description: "Route tasks across host-native agents and models"
-  default_prompt: "Use $intelligent-model-router to choose locally from the native agents or models available in this host, then execute the task."
+  short_description: "Choose the best model across configured providers"
+  default_prompt: "Use $intelligent-model-router to compare every available configured model, select the best one for this task, and execute through it."

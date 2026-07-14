@@ -1,8 +1,8 @@
 # Advanced self-hosting
 
-The external compatibility proxy is optional. Ordinary skill use discovers and executes through host-native agents or models and needs none of this setup.
+The external compatibility proxy supplies the broad model catalog. When its MCP tools are connected, the skill compares configured models across providers and delegates through the winner. Without it, the skill can route only among models or agents the host exposes natively.
 
-Use the proxy when the user explicitly wants a self-hosted cross-provider backend, compatibility endpoints, deterministic configured scoring, or local SQLite telemetry.
+Use this setup for cross-provider selection, compatibility endpoints, deterministic configured scoring, fallback, or local SQLite telemetry. YAML remains an advanced administrator concern rather than part of each routing request.
 
 ## Start the backend
 
@@ -24,7 +24,7 @@ Keep populated configuration and environment files out of source control. Bindin
 
 Harness examples are available for [Codex](../../../examples/codex.config.toml), [Claude Code](../../../examples/claude-code.md), [OpenCode](../../../examples/opencode.json), and [Pi](../../../examples/pi.md).
 
-## Optional MCP tools
+## MCP model catalog
 
 Build the project before launching `.mcp.json`, which points to `dist/mcp-server/index.js`. Set `MODEL_ROUTER_BASE_URL` and, when configured, `MODEL_ROUTER_AUTH_TOKEN` in the MCP server environment. These tools are available only when that server is connected:
 
@@ -32,9 +32,9 @@ Build the project before launching `.mcp.json`, which points to `dist/mcp-server
 - `delegate_task` sends one bounded prompt through the external proxy;
 - `explain_route`, `router_stats`, `submit_route_feedback`, and `list_router_models` inspect or update external backend state.
 
-Native routing does not call `route_task`. For optional external delegation, pass the exact logical model and protocol returned by `route_task` to `delegate_task`; do not rely on dry-run affinity.
+Call `list_router_models` first. Call `route_task` for every represented protocol with identical requirements, pass those results to `scripts/select-catalog-route.mjs`, and send its winning logical model and exact protocol to `delegate_task`. Do not rely on dry-run affinity alone.
 
-`delegate_task` must receive an explicit bounded prompt and `maxOutputTokens`. Send only required context and never credentials or unrelated source. If the optional backend is unavailable, continue with the host-native selection.
+`delegate_task` must receive an explicit bounded prompt and `maxOutputTokens`. Send only required context and never credentials or unrelated source. If the backend is unavailable, continue with host-native fallback routing.
 
 ## Compatibility controls
 
