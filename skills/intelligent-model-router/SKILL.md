@@ -1,19 +1,23 @@
 ---
 name: intelligent-model-router
-description: Choose and use the best model for a coding task across a configured model-router MCP catalog and host-native fallbacks. Use when Codex should compare available models, route a bounded task, preserve task affinity, or delegate through the selected provider.
+description: Automatically choose and use the best live Codex model or exposed user agent for a coding task using the prompt, bounded conversation context, and repository metadata. Use when Codex should act like an auto model mode, select reasoning effort, delegate a bounded task, or preserve task affinity.
 ---
 
 # Intelligent Model Router
 
-Prefer the configured model-router catalog for broad model selection. Fall back to host-native execution only when the catalog is unavailable or has no eligible model.
+Route once at the start of a bounded task, then keep that choice while the task remains materially unchanged.
 
-1. Determine the task's hard requirements: tools, structured output, vision, streaming, minimum context, expected output, and an opaque session ID when affinity is useful.
-2. When `list_router_models`, `route_task`, and `delegate_task` are exposed, call `list_router_models` and treat its enabled, healthy models as the primary catalog. Never limit this path to the currently selected Codex model.
-3. Call `route_task` once for every protocol represented by eligible catalog models, using the same task, profile, session, and requirements. Pass the results as `routes` to `node scripts/select-catalog-route.mjs` from this skill directory. Use its winner, which combines eligible candidates, keeps each model's highest score, and breaks exact ties by model ID. This cross-protocol comparison is required because the proxy does not translate protocols.
-4. Call `delegate_task` with the winning `selectedModel` and its exact `protocol`. Send a bounded objective, only necessary context, acceptance checks, and an explicit output-token limit. Never send secrets, credentials, or unrelated source.
-5. Keep the selected model for follow-ups in the same task. Re-route only when requirements change materially or the model becomes unavailable, ineligible, or fails.
-6. If the MCP catalog or delegation tools are unavailable, discover host-native agents and model controls. Use `node scripts/select-native-route.mjs` from this skill directory when a structured native inventory exists, execute through native controls, and use the current Codex model only as the final fallback. Never invent candidates or capabilities.
-7. Record route feedback only after an observable result such as passing tests, an accepted patch, a correction, or abandonment.
+1. Refuse to route when `MODEL_ROUTER_CHILD_DEPTH` is `1` or greater. Complete the task directly instead.
+2. Build a concise objective and conversation summary. Include only decisions, constraints, errors, and acceptance checks needed for this task. Never include system or developer instructions, tool transcripts, credentials, secrets, unrelated conversation, or unrelated source contents.
+3. Identify hard requirements: repository edits, tools, vision, web search, and minimum context. Register only user agents actually exposed by the current host. Always send each exact ID and display name. Send advertised descriptions, strengths, capabilities, or priors when available; omit missing metadata so the server applies its conservative native-agent defaults. Never invent an agent, model, or capability.
+4. When `auto_route` and `delegate_codex_task` are exposed, call `auto_route` with the objective, bounded summary, workspace root, registered agents, hard requirements, active profile, and the current model ID or visible UI label. The server resolves an unambiguous UI label, including a trailing effort label such as `5.6 Sol Medium`, against the live catalog. If the current label is unavailable or cannot be resolved, do not route; complete the task with the current model. Treat the live Codex catalog and registered agents as one candidate set. The current model is a fallback, not a ranked candidate.
+5. Follow the returned execution mode exactly:
+   - For `codex-exec`, call `delegate_codex_task` with the selected model, reasoning effort, objective, bounded summary, returned repository signals, acceptance checks, workspace root, hard search/vision requirements, trusted image paths when vision is required, and the minimum necessary permission. Use `read-only` unless the delegated worker must edit files.
+   - For `native-agent`, invoke the exact selected agent through the host's native agent control. Pass the same bounded objective, summary, acceptance checks, workspace root, and required edit permission; tell it not to re-route or delegate. Wait for it and incorporate its result.
+   - Treat a timed-out, nonzero-exit, or empty model result as unusable. Before falling back after any write-capable delegation, inspect the workspace for partial edits and verify or reconcile them; never start a second writer blindly. When `selected` is null, the selected route becomes unavailable, or delegation fails without a usable result, complete the task with the current model.
+6. Do not re-route follow-up turns unless requirements materially change or the selected candidate becomes unavailable. Do not recursively invoke this skill from a routed child.
+7. Verify the result in proportion to the task. Record feedback only after an observable outcome such as passing tests, an accepted patch, a correction, or abandonment.
+8. The skill alone cannot expose execution tools. If the auto tools are unavailable, tell the user to build/connect this repository's MCP server or use the current model; do not imply auto execution occurred. Use the legacy configured-provider flow only when `list_router_models`, `route_task`, and `delegate_task` are exposed. Read [references/advanced-self-hosting.md](references/advanced-self-hosting.md) for setup and that flow.
 
-Read [references/native-routing.md](references/native-routing.md) when the MCP catalog is unavailable and native fallback needs more detail.
-Read [references/advanced-self-hosting.md](references/advanced-self-hosting.md) when configuring the model catalog, provider compatibility API, YAML, telemetry, or MCP tools.
+Read [references/auto-routing.md](references/auto-routing.md) for input boundaries, candidate behavior, fallback semantics, and examples.
+Read [references/native-routing.md](references/native-routing.md) only when the auto tools are unavailable and native fallback needs more detail.

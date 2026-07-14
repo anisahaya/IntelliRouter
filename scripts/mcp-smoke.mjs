@@ -13,7 +13,9 @@ const client = new Client({ name: "model-router-smoke", version: "0.1.0" });
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 6);
+  assert.equal(tools.tools.length, 8);
+  assert.ok(tools.tools.some((tool) => tool.name === "auto_route"));
+  assert.ok(tools.tools.some((tool) => tool.name === "delegate_codex_task"));
   const route = await call("route_task", {
     task: "review this bounded function",
     profile: "balanced",
@@ -33,7 +35,7 @@ try {
   });
   assert.equal(delegated.structuredContent.result.text, "mock");
   assert.equal(delegated.structuredContent.result.fallbackCount, 0);
-  process.stdout.write("mcp smoke: all 6 tools passed over stdio against the running proxy\n");
+  process.stdout.write("mcp smoke: 8 tools registered and legacy proxy flow passed over stdio\n");
 } finally {
   await client.close();
   await harness.close();

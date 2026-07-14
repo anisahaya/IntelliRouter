@@ -15,14 +15,14 @@ assert.equal(
   false,
   "marketplace plugin must not require the optional MCP backend",
 );
-assert.match(skill, /list_router_models/);
-assert.match(skill, /route_task` once for every protocol/i);
-assert.match(skill, /select-catalog-route\.mjs/);
-assert.match(skill, /delegate_task` with the winning `selectedModel` and its exact `protocol`/i);
-assert.match(skill, /current Codex model only as the final fallback/i);
+assert.match(skill, /auto_route/);
+assert.match(skill, /delegate_codex_task/);
+assert.match(skill, /registered agents as one candidate set/i);
+assert.match(skill, /current model is a fallback, not a ranked candidate/i);
+assert.match(skill, /MODEL_ROUTER_CHILD_DEPTH/);
 
 const onboarding = readme.split(/^## Advanced self-hosting$/m)[0];
 assert.doesNotMatch(onboarding, /router\.config|MODEL_ROUTER_CONFIG|PROVIDER_[A-Z_]*API_KEY/);
-assert.match(onboarding, /currently selected Codex model are fallback paths/i);
+assert.match(onboarding, /currently selected Codex model as the final fallback/i);
 
 process.stdout.write("product contract valid\n");

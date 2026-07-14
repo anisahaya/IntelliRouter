@@ -1,4 +1,6 @@
 export * from "./affinity.js";
+export * from "./auto-features.js";
+export * from "./auto-scorer.js";
 export * from "./capabilities.js";
 export * from "./explain.js";
 export * from "./fallback.js";
