@@ -54,4 +54,25 @@ describe("provider adapters", () => {
     expect(new Headers(prepared.init.headers).get("x-api-key")).toBe("key");
     expect(String(prepared.init.body)).not.toContain("key");
   });
+
+  it("classifies transport and provider failures without retrying client mistakes", () => {
+    const adapter = new OpenAICompatibleAdapter();
+    expect(adapter.supports("openai-chat")).toBe(true);
+    expect(adapter.supports("anthropic-messages")).toBe(false);
+    expect(adapter.classifyError(new DOMException("stopped", "AbortError"))).toBe("timeout");
+    expect(adapter.classifyError(new TypeError("fetch failed"))).toBe("network");
+    expect(adapter.classifyError(new Error("odd"))).toBe("unknown");
+    for (const [status, classification] of [
+      [429, "rate_limit"],
+      [401, "auth"],
+      [404, "model_not_found"],
+      [529, "overloaded"],
+      [503, "upstream_5xx"],
+      [400, "client"],
+      [200, "unknown"],
+    ] as const) {
+      expect(adapter.classifyError(undefined, new Response(null, { status }))).toBe(classification);
+    }
+    expect(adapter.stream(new Response(null))).toBeNull();
+  });
 });

@@ -53,6 +53,11 @@ export const routerConfigSchema = z
           .int()
           .positive()
           .default(2 * 1024 * 1024),
+        responseLimitBytes: z
+          .number()
+          .int()
+          .positive()
+          .default(16 * 1024 * 1024),
       })
       .prefault({}),
     privacy: z
@@ -68,8 +73,16 @@ export const routerConfigSchema = z
         defaultProfile: z.string().default("balanced"),
         affinityTtlSeconds: z.number().int().positive().default(3600),
         fallbackOn: z
-          .array(z.enum(["timeout", "rate_limit", "overloaded", "upstream_5xx"]))
-          .default(["timeout", "rate_limit", "overloaded", "upstream_5xx"]),
+          .array(z.enum(["timeout", "network", "rate_limit", "overloaded", "upstream_5xx"]))
+          .default(["timeout", "network", "rate_limit", "overloaded", "upstream_5xx"]),
+        health: z
+          .object({
+            windowSize: z.number().int().min(1).default(20),
+            minimumObservations: z.number().int().min(1).default(5),
+            failureThreshold: z.number().min(0).max(1).default(0.6),
+            cooldownSeconds: z.number().int().positive().default(30),
+          })
+          .prefault({}),
         profiles: z.record(z.string(), z.object({ weights: weightsSchema })),
       })
       .refine((value) => value.defaultProfile in value.profiles, {
@@ -78,6 +91,20 @@ export const routerConfigSchema = z
   })
   .superRefine((value, context) => {
     const ids = new Set<string>();
+    if (value.privacy.storePrompts || value.privacy.storeResponses) {
+      context.addIssue({
+        code: "custom",
+        path: ["privacy"],
+        message: "raw prompt/response storage is not supported",
+      });
+    }
+    if (!value.privacy.hashSessionIds) {
+      context.addIssue({
+        code: "custom",
+        path: ["privacy", "hashSessionIds"],
+        message: "session hashing cannot be disabled",
+      });
+    }
     for (const model of value.models) {
       if (ids.has(model.id)) {
         context.addIssue({
@@ -87,6 +114,18 @@ export const routerConfigSchema = z
         });
       }
       ids.add(model.id);
+      const validProtocols =
+        model.provider === "anthropic"
+          ? ["anthropic-messages"]
+          : ["openai-chat", "openai-responses"];
+      for (const protocol of model.capabilities.protocols) {
+        if (!validProtocols.includes(protocol))
+          context.addIssue({
+            code: "custom",
+            path: ["models", model.id, "capabilities", "protocols"],
+            message: `provider ${model.provider} cannot serve ${protocol}`,
+          });
+      }
     }
     const loopback = ["127.0.0.1", "::1", "localhost"].includes(value.server.host);
     if (!loopback && !value.server.authTokenEnv) {

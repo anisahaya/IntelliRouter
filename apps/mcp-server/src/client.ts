@@ -48,22 +48,55 @@ export class ProxyClient {
     model?: string;
     session?: string;
     maxOutputTokens: number;
+    protocol?: "openai-chat" | "openai-responses" | "anthropic-messages";
   }): Promise<Record<string, unknown>> {
+    const protocol = input.protocol ?? "openai-chat";
     const selected = input.model ?? (input.profile ? `router/${input.profile}` : "auto");
-    const response = await this.raw("/v1/chat/completions", {
+    const path =
+      protocol === "openai-responses"
+        ? "/v1/responses"
+        : protocol === "anthropic-messages"
+          ? "/v1/messages"
+          : "/v1/chat/completions";
+    const payload =
+      protocol === "openai-responses"
+        ? {
+            model: selected,
+            stream: false,
+            max_output_tokens: input.maxOutputTokens,
+            input: input.prompt,
+          }
+        : protocol === "anthropic-messages"
+          ? {
+              model: selected,
+              stream: false,
+              max_tokens: input.maxOutputTokens,
+              messages: [{ role: "user", content: input.prompt }],
+            }
+          : {
+              model: selected,
+              stream: false,
+              max_completion_tokens: input.maxOutputTokens,
+              messages: [{ role: "user", content: input.prompt }],
+            };
+    const response = await this.raw(path, {
       method: "POST",
       headers: input.session ? { "x-router-session": input.session } : undefined,
-      body: JSON.stringify({
-        model: selected,
-        stream: false,
-        max_tokens: input.maxOutputTokens,
-        messages: [{ role: "user", content: input.prompt }],
-      }),
+      body: JSON.stringify(payload),
     });
     const body = (await response.json()) as Record<string, unknown>;
     const choices = body.choices as Array<Record<string, unknown>> | undefined;
     const message = choices?.[0]?.message as Record<string, unknown> | undefined;
-    const text = String(message?.content ?? "").slice(0, 32_000);
+    const responseOutput = body.output as Array<Record<string, unknown>> | undefined;
+    const responseContent = responseOutput?.flatMap((item) =>
+      Array.isArray(item.content) ? (item.content as Array<Record<string, unknown>>) : [],
+    );
+    const anthropicContent = Array.isArray(body.content)
+      ? (body.content as Array<Record<string, unknown>>)
+      : [];
+    const text = extractText(
+      message?.content ?? responseContent ?? anthropicContent ?? body.output_text,
+    ).slice(0, 32_000);
     return {
       text,
       model: response.headers.get("x-router-model") ?? String(body.model ?? "unknown"),
@@ -95,6 +128,16 @@ export class ProxyClient {
     }
     return response;
   }
+}
+
+function extractText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(extractText).filter(Boolean).join("");
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  if (typeof record.text === "string") return record.text;
+  if (record.content !== undefined) return extractText(record.content);
+  return "";
 }
 
 function boundObject(value: Record<string, unknown>): Record<string, unknown> {

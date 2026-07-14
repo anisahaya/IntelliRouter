@@ -108,7 +108,10 @@ export function createMcpServer(client = new ProxyClient()): McpServer {
         "Delegate one bounded prompt through the compatibility proxy with a strict output-token cap.",
       inputSchema: {
         prompt: z.string().min(1).max(32_000),
-        profile: z.enum(["economy", "balanced", "premium"]).optional(),
+        profile: z.string().min(1).max(64).optional(),
+        protocol: z
+          .enum(["openai-chat", "openai-responses", "anthropic-messages"])
+          .default("openai-chat"),
         model: z.string().max(128).optional(),
         session: z.string().max(512).optional(),
         maxOutputTokens: z.number().int().min(1).max(8_192).default(1_024),

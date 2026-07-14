@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type {
   ModelDefinition,
   NormalizedRequest,
@@ -31,6 +31,8 @@ export interface RouteOptions {
   pinnedModel?: string;
   sessionId?: string;
   excludeModels?: string[];
+  persist?: boolean;
+  kind?: "compatibility" | "dry_run";
 }
 
 export class RoutingEngine {
@@ -102,26 +104,32 @@ export class RoutingEngine {
       requestId,
       logicalModel: chosen.id,
       upstreamModel: chosen.upstreamModel,
+      provider: chosen.provider,
+      protocol: request.protocol,
       profile,
       features,
       candidates,
       fallbackChain: [],
       affinityUsed,
       createdAt: new Date().toISOString(),
+      kind: options.kind ?? "compatibility",
     };
-    this.state.saveDecision(decision);
-    if (sessionHash) {
-      this.#affinity.set(sessionHash, chosen.id, this.config.routing.affinityTtlSeconds);
-      this.state.setAffinity?.(
-        sessionHash,
-        chosen.id,
-        Date.now() + this.config.routing.affinityTtlSeconds * 1000,
-      );
-    }
+    if (options.persist !== false) this.state.saveDecision(decision);
     return decision;
   }
 
+  commitAffinity(sessionId: string | undefined, modelId: string): void {
+    if (!sessionId) return;
+    const sessionHash = this.hashSession(sessionId);
+    this.#affinity.set(sessionHash, modelId, this.config.routing.affinityTtlSeconds);
+    this.state.setAffinity?.(
+      sessionHash,
+      modelId,
+      Date.now() + this.config.routing.affinityTtlSeconds * 1000,
+    );
+  }
+
   private hashSession(value: string): string {
-    return createHash("sha256").update(this.sessionSalt).update(value).digest("hex");
+    return createHmac("sha256", this.sessionSalt).update(value).digest("hex");
   }
 }

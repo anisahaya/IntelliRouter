@@ -68,6 +68,7 @@ describe("routing", () => {
   it("keeps explicit sessions affine while eligible", () => {
     const engine = new RoutingEngine(config);
     const first = engine.select(request, { sessionId: "opaque" });
+    engine.commitAffinity("opaque", first.logicalModel);
     const second = engine.select(request, { sessionId: "opaque", profile: "premium" });
     expect(second.logicalModel).toBe(first.logicalModel);
     expect(second.affinityUsed).toBe(true);

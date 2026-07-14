@@ -28,11 +28,14 @@ export const routeDecisionSchema = z.object({
   requestId: z.string(),
   logicalModel: z.string(),
   upstreamModel: z.string(),
+  provider: z.string().optional(),
+  protocol: z.string().optional(),
   profile: z.string(),
   features: taskFeaturesSchema,
   candidates: z.array(routeCandidateSchema),
   fallbackChain: z.array(z.string()),
   affinityUsed: z.boolean(),
   createdAt: z.string(),
+  kind: z.enum(["compatibility", "dry_run", "legacy"]).optional(),
 });
 export type RouteDecision = z.infer<typeof routeDecisionSchema>;
