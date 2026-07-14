@@ -23,8 +23,8 @@
     "validate:skill": "UV_CACHE_DIR=${TMPDIR:-/tmp}/model-router-uv-cache uv run --with pyyaml python ${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py skills/intelligent-model-router",
     "validate:plugin": "UV_CACHE_DIR=${TMPDIR:-/tmp}/model-router-uv-cache uv run --with pyyaml python ${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py .",
     "validate:product": "node scripts/validate-product.mjs",
-    "verify": "pnpm lint && pnpm typecheck && pnpm validate:product && pnpm test:coverage && pnpm build && pnpm smoke && pnpm postman && pnpm mcp:smoke && pnpm validate:skill && pnpm validate:plugin",
-    "ci": "pnpm run verify"
+    "ci": "pnpm lint && pnpm typecheck && pnpm validate:product && pnpm test:coverage && pnpm build && pnpm smoke && pnpm postman && pnpm mcp:smoke",
+    "verify": "pnpm run ci && pnpm validate:skill && pnpm validate:plugin"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",
