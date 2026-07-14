@@ -1,6 +1,6 @@
-# Native routing
+# Native fallback routing
 
-Rebuild the candidate set at invocation time because host-exposed agents and models can change between tasks.
+Use this path only when the configured model-router MCP catalog or `delegate_task` is unavailable, or when no configured model satisfies the task.
 
 ## Candidate discovery
 
@@ -10,7 +10,7 @@ Use only candidates visible in one of these places:
 - agents or models identified in the system context;
 - agent handles or model choices the user explicitly supplied.
 
-The current host model is always the fallback. An installed skill, provider mentioned in documentation, or model remembered from another environment is not evidence that a candidate is currently available.
+The current host model is the final fallback. An installed skill, provider mentioned in documentation, or model remembered from another environment is not evidence that a candidate is currently available.
 
 ## Local decision
 
