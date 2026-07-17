@@ -1,6 +1,6 @@
 {
   "name": "model-router",
-  "version": "0.1.0+codex.20260717203048",
+  "version": "0.1.0+codex.20260717230602",
   "description": "Auto-select and execute the best signed-in model across Codex, OpenCode, and Claude Code.",
   "author": {
     "name": "Model Router contributors"

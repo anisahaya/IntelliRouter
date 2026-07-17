@@ -4,6 +4,7 @@ import { type CodexExecOptions, executeCodexTask } from "./codex-exec.js";
 import { executeOpenCodeTask, type OpenCodeExecOptions } from "./opencode-exec.js";
 import { collectRepoSignals, type RepoSignalOptions } from "./repo-signals.js";
 import { getRouteRecord, type RouteStateOptions, updateRouteOutcome } from "./route-state.js";
+import { resolveTaskTimeout } from "./timeout.js";
 
 export interface HarnessTaskInput {
   routeId: string;
@@ -71,7 +72,7 @@ export async function executeHarnessTask(
       : undefined;
   let raw: Awaited<ReturnType<typeof executeWithAdapter>>;
   try {
-    raw = await executeWithAdapter(input, options, env);
+    raw = await executeWithAdapter(input, options, env, record.featureSummary);
   } catch (error) {
     const after =
       input.permission === "workspace-write"
@@ -145,6 +146,7 @@ async function executeWithAdapter(
   input: HarnessTaskInput,
   options: HarnessExecOptions,
   env: NodeJS.ProcessEnv,
+  featureSummary: { taskType: string; scope: string; complexity: number; risk: number },
 ) {
   const common = {
     model: input.model,
@@ -158,7 +160,13 @@ async function executeWithAdapter(
     repoSignals: input.repoSignals,
     workspaceRoot: input.workspaceRoot,
     permission: input.permission,
-    timeoutMs: input.timeoutMs,
+    timeoutMs: resolveTaskTimeout({
+      timeoutMs: input.timeoutMs,
+      objective: input.objective,
+      repoSignals: input.repoSignals,
+      permission: input.permission,
+      featureSummary,
+    }),
   };
   if (input.harness === "codex") {
     const result = await executeCodexTask(common, { ...options.codex, env });

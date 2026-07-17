@@ -85,7 +85,7 @@ export const delegateCodexTaskInput = {
   repoSignals: repoSignalsSchema,
   workspaceRoot: z.string().min(1).max(4_096),
   permission: z.enum(["read-only", "workspace-write"]).default("read-only"),
-  timeoutMs: z.number().int().min(1_000).max(600_000).default(120_000),
+  timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
 };
 
 export const routeHarnessTaskInput = {
@@ -121,7 +121,7 @@ export const delegateHarnessTaskInput = {
   repoSignals: repoSignalsSchema,
   workspaceRoot: z.string().min(1).max(4_096),
   permission: z.enum(["read-only", "workspace-write"]).default("read-only"),
-  timeoutMs: z.number().int().min(1_000).max(600_000).default(120_000),
+  timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
 };
 
 export function createToolHandlers(

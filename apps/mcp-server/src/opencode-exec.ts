@@ -8,9 +8,9 @@ import {
   sanitizeText,
 } from "./context-security.js";
 import { discoverOpenCodeModels, type OpenCodeDiscoveryOptions } from "./opencode-cli.js";
+import { resolveTaskTimeout } from "./timeout.js";
 import { resolveTrustedFile, resolveTrustedWorkspace } from "./workspace-security.js";
 
-const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_CAPTURE_CHARS = 64_000;
 const workspaceLocks = new Set<string>();
 
@@ -116,7 +116,7 @@ export async function executeOpenCodeTask(
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
       }),
-      input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      resolveTaskTimeout(input),
       input.model,
       input.reasoningEffort,
       objective.redacted || conversation.redacted || checks.some((check) => check.redacted),

@@ -123,7 +123,7 @@ A model `id` is the logical alias callers pin. `upstreamModel` is the provider's
 
 The proxy normalizes enough metadata to detect required protocol, tools, JSON output, vision, streaming, and context size. Ineligible configured models are excluded before deterministic scoring. Explicit opaque sessions retain the selected model until affinity expires or it becomes ineligible or unhealthy.
 
-Configured timeouts, network failures, rate limits, overloads, and upstream 5xx responses can fall back to the next candidate only before any response byte is emitted. Feedback is an explicit, inspectable prior; there is no opaque training in v0.1.
+Native delegation defaults to 120 seconds for small or mechanical work and 300 seconds for repository-scale read-only review, debugging, and general tasks; callers may set an explicit timeout up to 600 seconds. Configured timeouts, network failures, rate limits, overloads, and upstream 5xx responses can fall back to the next candidate only before any response byte is emitted. Feedback is an explicit, inspectable prior; there is no opaque training in v0.1.
 
 ### Privacy and security
 
