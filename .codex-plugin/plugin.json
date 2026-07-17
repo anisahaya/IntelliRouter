@@ -6,12 +6,7 @@
     "name": "Model Router contributors"
   },
   "license": "MIT",
-  "keywords": [
-    "models",
-    "routing",
-    "mcp",
-    "coding-agents"
-  ],
+  "keywords": ["models", "routing", "mcp", "coding-agents"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Intelligent Model Router",
@@ -19,11 +14,7 @@
     "longDescription": "Use bounded prompt, conversation, and repository context to choose an exact signed-in Codex or OpenCode model and reasoning effort, preserve task affinity, and keep the current model as fallback.",
     "developerName": "Model Router contributors",
     "category": "Developer Tools",
-    "capabilities": [
-      "Live harness model discovery",
-      "Task affinity",
-      "Bounded native delegation"
-    ],
+    "capabilities": ["Live harness model discovery", "Task affinity", "Bounded native delegation"],
     "defaultPrompt": [
       "Automatically choose the best signed-in model for this coding task.",
       "Use conversation and repository context to route this bounded task.",
