@@ -4,12 +4,16 @@ import { z } from "zod/v4";
 import type { AutoRouterOptions } from "./auto-router.js";
 import { ProxyClient } from "./client.js";
 import type { CodexExecOptions } from "./codex-exec.js";
+import type { HarnessExecOptions } from "./harness-exec.js";
+import type { HarnessRouterOptions } from "./harness-router.js";
 import {
   autoRouteInput,
   createToolHandlers,
   delegateCodexTaskInput,
+  delegateHarnessTaskInput,
   failure,
   genericObjectOutput,
+  routeHarnessTaskInput,
   routeTaskInput,
   routeTaskOutput,
   success,
@@ -17,7 +21,12 @@ import {
 
 export function createMcpServer(
   client = new ProxyClient(),
-  options: { autoRouter?: AutoRouterOptions; codexExec?: CodexExecOptions } = {},
+  options: {
+    autoRouter?: AutoRouterOptions;
+    codexExec?: CodexExecOptions;
+    harnessRouter?: HarnessRouterOptions;
+    harnessExec?: HarnessExecOptions;
+  } = {},
 ): McpServer {
   const server = new McpServer({ name: "model-router", version: "0.1.0" });
   const handlers = createToolHandlers(client, options);
@@ -128,6 +137,73 @@ export function createMcpServer(
     async (input) => {
       try {
         return success(await handlers.delegate(input));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "route_harness_task",
+    {
+      description:
+        "Discover the signed-in model catalog for Codex or OpenCode, combine bounded prompt/conversation/repository context, preserve task affinity, and return an inspectable native route.",
+      inputSchema: routeHarnessTaskInput,
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.routeHarnessTask(input));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "delegate_harness_task",
+    {
+      description:
+        "Execute a prior native Codex or OpenCode route with exact model/effort revalidation, recursion prevention, bounded context, workspace controls, and partial-write detection.",
+      inputSchema: delegateHarnessTaskInput,
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.delegateHarnessTask(input));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "explain_harness_route",
+    {
+      description:
+        "Read the persisted privacy-safe decision, features, affinity, and outcome for a native harness route.",
+      inputSchema: { routeId: z.string().uuid() },
+      outputSchema: genericObjectOutput,
+    },
+    async ({ routeId }) => {
+      try {
+        return success(await handlers.explainHarnessRoute(routeId));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "submit_harness_feedback",
+    {
+      description: "Attach an observable outcome to a persisted native harness route.",
+      inputSchema: {
+        routeId: z.string().uuid(),
+        outcome: z.enum(["success", "failure", "corrected", "abandoned"]),
+        reason: z.string().max(512).optional(),
+      },
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.submitHarnessFeedback(input));
       } catch (error) {
         return failure(error);
       }

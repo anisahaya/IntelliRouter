@@ -1,7 +1,7 @@
 {
   "name": "model-router",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "packageManager": "pnpm@11.9.0",
   "engines": {
@@ -10,8 +10,17 @@
   "bin": {
     "model-router": "dist/cli/index.js"
   },
+  "files": [
+    "dist/",
+    "skills/",
+    ".mcp.json",
+    ".codex-plugin/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
+    "pack:check": "pnpm build && npm pack --dry-run",
     "lint": "biome check .",
     "format": "biome check --write .",
     "typecheck": "tsc --noEmit",
@@ -23,7 +32,7 @@
     "validate:skill": "UV_CACHE_DIR=${TMPDIR:-/tmp}/model-router-uv-cache uv run --with pyyaml python ${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py skills/intelligent-model-router",
     "validate:plugin": "UV_CACHE_DIR=${TMPDIR:-/tmp}/model-router-uv-cache uv run --with pyyaml python ${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py .",
     "validate:product": "node scripts/validate-product.mjs",
-    "ci": "pnpm lint && pnpm typecheck && pnpm validate:product && pnpm test:coverage && pnpm build && pnpm smoke && pnpm postman && pnpm mcp:smoke",
+    "ci": "pnpm lint && pnpm typecheck && pnpm validate:product && pnpm test:coverage && pnpm build && pnpm pack:check && pnpm smoke && pnpm postman && pnpm mcp:smoke",
     "verify": "pnpm run ci && pnpm validate:skill && pnpm validate:plugin"
   },
   "dependencies": {

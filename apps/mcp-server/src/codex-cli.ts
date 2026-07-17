@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
 
 const execFileAsync = promisify(execFile);
-const allowedEfforts = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh", "max"]);
+const allowedEfforts = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh", "max", "ultra"]);
 
 interface RawModel {
   slug?: unknown;
@@ -124,6 +124,7 @@ function mapModel(model: RawModel): AutoCandidate | undefined {
   return {
     id: model.slug,
     kind: "codex-model",
+    harness: "codex",
     displayName,
     description,
     available: true,

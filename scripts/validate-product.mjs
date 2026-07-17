@@ -15,14 +15,17 @@ assert.equal(
   false,
   "marketplace plugin must not require the optional MCP backend",
 );
-assert.match(skill, /auto_route/);
-assert.match(skill, /delegate_codex_task/);
-assert.match(skill, /registered agents as one candidate set/i);
-assert.match(skill, /current model is a fallback, not a ranked candidate/i);
+assert.match(skill, /route_harness_task/);
+assert.match(skill, /delegate_harness_task/);
+assert.match(skill, /explain_harness_route/);
+assert.match(skill, /submit_harness_feedback/);
+assert.match(skill, /Codex-only workflow/i);
 assert.match(skill, /MODEL_ROUTER_CHILD_DEPTH/);
 
 const onboarding = readme.split(/^## Advanced self-hosting$/m)[0];
 assert.doesNotMatch(onboarding, /router\.config|MODEL_ROUTER_CONFIG|PROVIDER_[A-Z_]*API_KEY/);
-assert.match(onboarding, /currently selected Codex model as the final fallback/i);
+assert.match(onboarding, /retains the current host model as fallback/i);
+assert.match(readme, /OpenCode continues using its existing OAuth\/subscription credentials/i);
+assert.match(readme, /OpenCode Desktop is not a target surface/i);
 
 process.stdout.write("product contract valid\n");

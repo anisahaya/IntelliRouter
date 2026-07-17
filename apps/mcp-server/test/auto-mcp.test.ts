@@ -46,6 +46,15 @@ describe("auto routing over MCP", () => {
         trustedRoot: fixtureRoot,
       },
       codexExec: { executable: fakeCodex, trustedRoot: fixtureRoot },
+      harnessRouter: {
+        codex: { executable: fakeCodex },
+        trustedRoot: fixtureRoot,
+        state: { path: join(fixtureRoot, "harness-routes.jsonl") },
+      },
+      harnessExec: {
+        codex: { executable: fakeCodex, trustedRoot: fixtureRoot },
+        state: { path: join(fixtureRoot, "harness-routes.jsonl") },
+      },
     });
     const client = new Client({ name: "auto-mcp-test", version: "0.1.0" });
     await server.connect(serverTransport);
@@ -53,7 +62,14 @@ describe("auto routing over MCP", () => {
     try {
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining(["auto_route", "delegate_codex_task"]),
+        expect.arrayContaining([
+          "auto_route",
+          "delegate_codex_task",
+          "route_harness_task",
+          "delegate_harness_task",
+          "explain_harness_route",
+          "submit_harness_feedback",
+        ]),
       );
       const routed = await client.callTool({
         name: "auto_route",
@@ -89,6 +105,59 @@ describe("auto routing over MCP", () => {
       expect(delegated.isError).toBeUndefined();
       const execution = (delegated.structuredContent as { result: { output: string } }).result;
       expect(execution.output).toBe("executed:gpt-frontier:true");
+
+      const harnessRouted = await client.callTool({
+        name: "route_harness_task",
+        arguments: {
+          harness: "codex",
+          objective: "Fix the auth architecture across multiple files",
+          workspaceRoot: workspace,
+          profile: "quality",
+          currentModel: "Current Model Medium",
+          sessionId: "mcp-session",
+          requirements: { tools: true, edit: true },
+        },
+      });
+      expect(harnessRouted.isError).toBeUndefined();
+      const harnessDecision = (
+        harnessRouted.structuredContent as { result: Record<string, unknown> }
+      ).result as {
+        routeId: string;
+        selected: { id: string; reasoningEffort: "high" | "xhigh" };
+        repoSignals: Record<string, unknown>;
+      };
+      expect(harnessDecision.selected.id).toBe("gpt-frontier");
+      const harnessDelegated = await client.callTool({
+        name: "delegate_harness_task",
+        arguments: {
+          routeId: harnessDecision.routeId,
+          harness: "codex",
+          model: harnessDecision.selected.id,
+          reasoningEffort: harnessDecision.selected.reasoningEffort,
+          objective: "Fix the auth architecture across multiple files",
+          repoSignals: harnessDecision.repoSignals,
+          workspaceRoot: workspace,
+          permission: "read-only",
+        },
+      });
+      expect(harnessDelegated.isError).toBeUndefined();
+      expect(
+        (
+          harnessDelegated.structuredContent as {
+            result: { output: string; outcome: string };
+          }
+        ).result,
+      ).toMatchObject({ output: "executed:gpt-frontier:true", outcome: "success" });
+      const explained = await client.callTool({
+        name: "explain_harness_route",
+        arguments: { routeId: harnessDecision.routeId },
+      });
+      expect(explained.isError).toBeUndefined();
+      const feedback = await client.callTool({
+        name: "submit_harness_feedback",
+        arguments: { routeId: harnessDecision.routeId, outcome: "success" },
+      });
+      expect(feedback.isError).toBeUndefined();
     } finally {
       await client.close();
       await server.close();

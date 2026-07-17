@@ -15,6 +15,11 @@ const repo: RepoSignals = {
   monorepo: false,
   dirty: false,
   truncated: false,
+  changedFiles: [],
+  topLevelDirectories: [],
+  dependencyNames: [],
+  packageCount: 1,
+  hasCi: false,
 };
 
 const commonCapabilities = {

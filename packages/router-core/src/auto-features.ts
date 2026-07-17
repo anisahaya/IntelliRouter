@@ -123,6 +123,7 @@ function effortFor(
   mechanical: number,
 ): ReasoningEffort {
   const demand = clamp(complexity * 0.5 + ambiguity * 0.25 + risk * 0.35 - mechanical * 0.18);
+  if (demand >= 0.96) return "ultra";
   if (demand >= 0.86) return "max";
   if (demand >= 0.68) return "xhigh";
   if (demand >= 0.48) return "high";

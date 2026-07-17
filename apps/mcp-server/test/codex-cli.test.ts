@@ -61,7 +61,7 @@ describe("Codex model discovery", () => {
       id: "future-frontier",
       kind: "codex-model",
       available: true,
-      supportedEfforts: ["low", "high"],
+      supportedEfforts: ["low", "high", "ultra"],
       capabilities: { vision: true, search: true, maxContextTokens: 123456 },
     });
     expect(candidates[0]?.strengths).toContain("complex");
@@ -164,6 +164,11 @@ describe("Codex model discovery", () => {
       monorepo: true,
       dirty: false,
       truncated: false,
+      changedFiles: [],
+      topLevelDirectories: [],
+      dependencyNames: [],
+      packageCount: 2,
+      hasCi: false,
     };
     const winner = (objective: string) => {
       const task = buildAutoTaskProfile({

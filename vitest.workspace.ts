@@ -16,6 +16,7 @@ export default defineConfig({
         "apps/proxy/src/server.ts",
         "apps/mcp-server/src/index.ts",
         "packages/cli/src/index.ts",
+        "packages/cli/src/native-doctor.ts",
         "packages/cli/src/serve.ts",
       ],
       thresholds: { statements: 80, lines: 80, functions: 80, branches: 70 },

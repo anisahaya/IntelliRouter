@@ -1,4 +1,4 @@
 interface:
   display_name: "Intelligent Model Router"
-  short_description: "Auto-select the best Codex model or user agent"
-  default_prompt: "Use $intelligent-model-router to choose the best live Codex model or exposed user agent for this task, select its reasoning effort, execute the bounded work, and verify the result."
+  short_description: "Auto-route tasks across Codex and OpenCode models"
+  default_prompt: "Use $intelligent-model-router to choose the best live model exposed by this coding harness, select its reasoning effort, execute the bounded work, and verify the result."
