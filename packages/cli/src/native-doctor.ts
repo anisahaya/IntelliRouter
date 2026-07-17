@@ -4,13 +4,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { HarnessId } from "@model-router/contracts";
+import { discoverClaudeModels } from "../../../apps/mcp-server/src/claude-cli.js";
 import { discoverCodexModels } from "../../../apps/mcp-server/src/codex-cli.js";
 import { discoverOpenCodeModels } from "../../../apps/mcp-server/src/opencode-cli.js";
 
 const execFileAsync = promisify(execFile);
 
 export async function nativeDoctor(harness: HarnessId | "all"): Promise<Record<string, unknown>> {
-  const selected = harness === "all" ? (["codex", "opencode"] as const) : [harness];
+  const selected = harness === "all" ? (["codex", "opencode", "claude-code"] as const) : [harness];
   const checks = await Promise.all(selected.map((value) => checkHarness(value)));
   return {
     ready: checks.every((check) => check.ready),
@@ -20,21 +21,21 @@ export async function nativeDoctor(harness: HarnessId | "all"): Promise<Record<s
 }
 
 async function checkHarness(harness: HarnessId): Promise<Record<string, unknown>> {
-  if (harness !== "codex" && harness !== "opencode") {
+  if (harness === "pi") {
     return {
       harness,
       ready: false,
       nativeAdapter: false,
-      message: "Use the compatibility gateway until the native adapter ships.",
+      message: "Use the compatibility gateway until the native Pi adapter ships.",
     };
   }
   try {
-    const executable = harness === "codex" ? "codex" : "opencode";
+    const executable =
+      harness === "codex" ? "codex" : harness === "opencode" ? "opencode" : "claude";
     const version = (
       await execFileAsync(executable, ["--version"], { timeout: 10_000 })
     ).stdout.trim();
-    const models =
-      harness === "codex" ? await discoverCodexModels() : await discoverOpenCodeModels();
+    const models = await discoverModels(harness);
     return {
       harness,
       ready: models.length > 0,
@@ -56,6 +57,12 @@ async function checkHarness(harness: HarnessId): Promise<Record<string, unknown>
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function discoverModels(harness: HarnessId) {
+  if (harness === "codex") return discoverCodexModels();
+  if (harness === "opencode") return discoverOpenCodeModels();
+  return discoverClaudeModels();
 }
 
 async function packageCheck(): Promise<Record<string, unknown>> {

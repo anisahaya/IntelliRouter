@@ -1,8 +1,8 @@
 # Intelligent Model Router
 
-A cross-harness skill and local MCP that act like an auto-model mode. It uses the prompt, a bounded conversation summary, and privacy-safe repository metadata to rank the live models exposed by the signed-in Codex or OpenCode CLI. It selects an exact model and reasoning effort, delegates through that same harness and subscription, persists task affinity, and retains the current host model as fallback.
+A cross-harness skill and local MCP that act like an auto-model mode. It uses the prompt, a bounded conversation summary, and privacy-safe repository metadata to rank models exposed by the signed-in Codex, OpenCode, or Claude Code CLI. It selects an exact model and reasoning effort, delegates through that same harness and subscription, persists task affinity, and retains the current host model as fallback.
 
-The plugin owns the workflow. Native Codex/OpenCode routing needs no provider key, YAML, or proxy. The separate self-hosted gateway remains available for Claude Code, Pi, and cross-provider API compatibility.
+The plugin owns the workflow. Native Codex, OpenCode, and Claude Code routing needs no separate provider key, YAML, or proxy. The separate self-hosted gateway remains available for Pi and cross-provider API compatibility.
 
 ## Why this exists
 
@@ -18,19 +18,21 @@ model-router setup --harness all
 model-router doctor --harness all
 ```
 
-During local development, run `pnpm build` and `node dist/cli/index.js setup --harness all`. Restart Codex/OpenCode after setup, then ask:
+During local development, run `pnpm build` and `node dist/cli/index.js setup --harness all`. Restart Codex, OpenCode, or Claude Code after setup, then ask:
 
 ```text
 Use $intelligent-model-router to choose the best live model for this task, execute the bounded work, and verify it.
 ```
 
-`setup` registers the bundled MCP and portable skill. It does not change the selected model, provider, or authentication. OpenCode continues using its existing OAuth/subscription credentials. The optional legacy proxy variables are not required for `route_harness_task` or `delegate_harness_task`.
+`setup` registers the bundled MCP and portable skill. It does not change the selected model, provider, or authentication. OpenCode and Claude Code continue using their existing OAuth/subscription credentials. The optional legacy proxy variables are not required for `route_harness_task` or `delegate_harness_task`.
 
 By default, each MCP launch trusts the harness's active working directory. Set `MODEL_ROUTER_WORKSPACE_ROOT` only when the MCP process must start elsewhere and you deliberately want to pin a broader or different trusted root.
 
 Codex does not currently expose an authoritative current-model query to MCP. The visible model label must therefore be present in task context (for example, `5.6 Sol Medium`) so the router can reserve it as fallback. If the host does not provide that label, include it in the request once; an absent or ambiguous label safely disables auto-routing instead of risking recursive selection of the host model.
 
-When connected, the skill calls `route_harness_task`. The server discovers through `codex debug models` or `opencode models --verbose`, derives task features from bounded context and repository metadata, and returns the winner plus effort. Winners run through guarded `codex exec` or `opencode run` children. Existing Codex-only `auto_route` and `delegate_codex_task` tools remain during migration.
+When connected, the skill calls `route_harness_task`. The server discovers through `codex debug models`, `opencode models --verbose`, or the signed-in Claude Code model aliases allowed by settings. It derives task features from bounded context and repository metadata and returns the winner plus effort. Winners run through guarded `codex exec`, `opencode run`, or `claude --print` children. Existing Codex-only `auto_route` and `delegate_codex_task` tools remain during migration.
+
+Claude Code does not expose a machine-readable live model picker. The native adapter therefore uses its documented rolling aliases (`opus`, `sonnet`, and `haiku`) and honors `availableModels` from user settings when present. Execution revalidates the alias through Claude Code itself; unavailable account entitlements fail safely back to the current host model.
 
 ## Harness status
 
@@ -38,9 +40,9 @@ When connected, the skill calls `route_harness_task`. The server discovers throu
 | --- | --- | --- | --- | --- | --- |
 | 1 | Codex app | Codex CLI | `codex exec` | Existing ChatGPT/Codex sign-in | Ready |
 | 2 | Codex CLI | Codex CLI | `codex exec` | Existing ChatGPT/Codex sign-in | Ready |
-| 3 | Claude Code CLI | Compatibility gateway | Anthropic Messages | Provider/gateway credentials | Adapter contract and setup docs |
+| 3 | Claude Code CLI | Signed-in aliases and `availableModels` | `claude --print` | Existing Claude Code sign-in | Ready; live invocation still requires available usage |
 | 4 | OpenCode CLI | OpenCode CLI | `opencode run` | Existing OpenCode OAuth/subscription | Ready |
-| 5 | Pi CLI | Compatibility gateway | OpenAI-compatible | Provider/gateway credentials | Adapter contract and setup docs |
+| 5 | Pi CLI | Compatibility gateway | OpenAI-compatible | Provider/gateway credentials | Deferred; native adapter planned later |
 
 OpenCode Desktop is not a target surface; OpenCode CLI is.
 
@@ -56,7 +58,7 @@ bounded task context + repository metadata
                 v
 portable skill -> route_harness_task -> signed-in harness models + exposed agents
                 |                                      |
-                +-> Codex/OpenCode native child        +-> native-agent winner
+                +-> Codex/OpenCode/Claude child        +-> native-agent winner
                 |
                 +-> current model fallback
 ```
@@ -137,9 +139,9 @@ model-router explain <route-id>
 model-router stats [--since ISO_TIMESTAMP] [--model alias] [--task type]
 model-router feedback <route-id> --outcome success [--score 1] [--tag accepted]
 model-router config init [path]
-model-router setup --harness codex|opencode|all [--force]
-model-router doctor --harness codex|opencode|all
-model-router route-native --harness codex|opencode --objective "..." [--current-model "..."]
+model-router setup --harness codex|opencode|claude-code|all [--force]
+model-router doctor --harness codex|opencode|claude-code|all
+model-router route-native --harness codex|opencode|claude-code --objective "..." [--current-model "..."]
 model-router explain-native <route-id>
 ```
 
@@ -152,7 +154,7 @@ Additional limitations: health uses persisted recent-attempt windows and circuit
 ## Architecture
 
 ```text
-portable skill -> route_harness_task -> live Codex/OpenCode catalog
+portable skill -> route_harness_task -> Codex/OpenCode catalog or Claude aliases
      |                     |
      |                     +-> delegate_harness_task
      |

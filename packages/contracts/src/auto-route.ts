@@ -122,7 +122,7 @@ export const autoRouteDecisionSchema = z.object({
       kind: z.enum(["codex-model", "harness-model", "user-agent"]),
       displayName: z.string(),
       reasoningEffort: reasoningEffortSchema.optional(),
-      execution: z.enum(["codex-exec", "opencode-run", "native-agent"]),
+      execution: z.enum(["codex-exec", "opencode-run", "claude-print", "native-agent"]),
     })
     .nullable(),
   profile: autoRouteProfileSchema,

@@ -24,13 +24,14 @@ export async function setupHarness(
   options: { force?: boolean; configPath?: string } = {},
 ): Promise<Record<string, unknown>> {
   const assets = await installedAssets();
-  const selected = harness === "all" ? (["codex", "opencode"] as const) : [harness];
+  const selected = harness === "all" ? (["codex", "opencode", "claude-code"] as const) : [harness];
   const results = [];
   for (const value of selected) {
     if (value === "codex") results.push(await setupCodex(assets, options.force));
     else if (value === "opencode") {
       results.push(await setupOpenCode(assets, options.configPath));
-    } else {
+    } else if (value === "claude-code") results.push(await setupClaude(assets, options.force));
+    else {
       results.push({
         harness: value,
         configured: false,
@@ -43,11 +44,16 @@ export async function setupHarness(
 }
 
 async function setupCodex(
-  assets: { mcp: string; skillDirectory: string },
+  assets: InstalledAssets,
   force = false,
 ): Promise<Record<string, unknown>> {
   const existing = await codexMcpEntry();
-  const skill = await ensureCodexSkill(assets.skillDirectory, force);
+  const skill = await ensureSkill(
+    join(assets.skillDirectory, "intelligent-model-router"),
+    join(homedir(), ".codex", "skills", "intelligent-model-router"),
+    force,
+    "Use the Codex plugin updater to replace it.",
+  );
   if (existing && !force) {
     return {
       harness: "codex",
@@ -63,12 +69,12 @@ async function setupCodex(
   return { harness: "codex", configured: true, changed: true, auth: "host-native", skill };
 }
 
-async function ensureCodexSkill(
-  skillDirectory: string,
+async function ensureSkill(
+  source: string,
+  target: string,
   force: boolean,
+  preservedMessage: string,
 ): Promise<Record<string, unknown>> {
-  const source = join(skillDirectory, "intelligent-model-router");
-  const target = join(homedir(), ".codex", "skills", "intelligent-model-router");
   await mkdir(dirname(target), { recursive: true });
   try {
     const info = await lstat(target);
@@ -85,7 +91,7 @@ async function ensureCodexSkill(
       configured: true,
       changed: false,
       path: target,
-      message: "An existing skill was preserved; use the Codex plugin updater to replace it.",
+      message: `An existing skill was preserved; ${preservedMessage}`,
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -106,7 +112,7 @@ async function codexMcpEntry(): Promise<unknown | undefined> {
 }
 
 async function setupOpenCode(
-  assets: { mcp: string; skillDirectory: string },
+  assets: InstalledAssets,
   configOverride?: string,
 ): Promise<Record<string, unknown>> {
   const configPath = configOverride ?? (await openCodeConfigPath());
@@ -148,7 +154,59 @@ async function setupOpenCode(
   };
 }
 
-async function installedAssets(): Promise<{ mcp: string; skillDirectory: string }> {
+async function setupClaude(
+  assets: InstalledAssets,
+  force = false,
+): Promise<Record<string, unknown>> {
+  const skill = await ensureSkill(
+    join(assets.skillDirectory, "intelligent-model-router"),
+    join(homedir(), ".claude", "skills", "intelligent-model-router"),
+    force,
+    "pass --force to replace it.",
+  );
+  const existing = await claudeMcpEntry();
+  if (existing && !force) {
+    return {
+      harness: "claude-code",
+      configured: true,
+      changed: false,
+      existing,
+      skill,
+      auth: "existing Claude Code sign-in",
+    };
+  }
+  if (existing && force) {
+    await execFileAsync("claude", ["mcp", "remove", "--scope", "user", "model-router"]);
+  }
+  await execFileAsync("claude", claudeMcpAddArgs(assets.mcp));
+  return {
+    harness: "claude-code",
+    configured: true,
+    changed: true,
+    auth: "existing Claude Code sign-in",
+    skill,
+  };
+}
+
+async function claudeMcpEntry(): Promise<string | undefined> {
+  try {
+    return (await execFileAsync("claude", ["mcp", "get", "model-router"], { timeout: 10_000 }))
+      .stdout;
+  } catch {
+    return undefined;
+  }
+}
+
+export function claudeMcpAddArgs(mcpPath: string, nodePath = process.execPath): string[] {
+  return ["mcp", "add", "--scope", "user", "model-router", "--", nodePath, mcpPath];
+}
+
+interface InstalledAssets {
+  mcp: string;
+  skillDirectory: string;
+}
+
+async function installedAssets(): Promise<InstalledAssets> {
   for (const relativeRoot of ["../../", "../../../"]) {
     const packageRoot = fileURLToPath(new URL(relativeRoot, import.meta.url));
     const mcp = join(packageRoot, "dist", "mcp-server", "index.js");

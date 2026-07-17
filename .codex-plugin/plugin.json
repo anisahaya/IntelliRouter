@@ -1,7 +1,7 @@
 {
   "name": "model-router",
-  "version": "0.1.0+codex.20260717194733",
-  "description": "Auto-select and execute the best signed-in model across Codex and OpenCode.",
+  "version": "0.1.0+codex.20260717203048",
+  "description": "Auto-select and execute the best signed-in model across Codex, OpenCode, and Claude Code.",
   "author": {
     "name": "Model Router contributors"
   },
@@ -11,7 +11,7 @@
   "interface": {
     "displayName": "Intelligent Model Router",
     "shortDescription": "Auto-route tasks across coding harness models.",
-    "longDescription": "Use bounded prompt, conversation, and repository context to choose an exact signed-in Codex or OpenCode model and reasoning effort, preserve task affinity, and keep the current model as fallback.",
+    "longDescription": "Use bounded prompt, conversation, and repository context to choose a signed-in Codex, OpenCode, or Claude Code model and reasoning effort, preserve task affinity, and keep the current model as fallback.",
     "developerName": "Model Router contributors",
     "category": "Developer Tools",
     "capabilities": ["Live harness model discovery", "Task affinity", "Bounded native delegation"],

@@ -1,4 +1,5 @@
 import type { HarnessId, ReasoningEffort, RepoSignals } from "@model-router/contracts";
+import { type ClaudeExecOptions, executeClaudeTask } from "./claude-exec.js";
 import { type CodexExecOptions, executeCodexTask } from "./codex-exec.js";
 import { executeOpenCodeTask, type OpenCodeExecOptions } from "./opencode-exec.js";
 import { collectRepoSignals, type RepoSignalOptions } from "./repo-signals.js";
@@ -41,6 +42,7 @@ export interface HarnessTaskResult {
 export interface HarnessExecOptions {
   codex?: CodexExecOptions;
   opencode?: OpenCodeExecOptions;
+  claude?: ClaudeExecOptions;
   repo?: RepoSignalOptions;
   state?: RouteStateOptions;
   env?: NodeJS.ProcessEnv;
@@ -166,7 +168,11 @@ async function executeWithAdapter(
     const result = await executeOpenCodeTask(common, { ...options.opencode, env });
     return { ...result, childSessionId: result.sessionId };
   }
-  throw new Error(`${input.harness} native execution is not available yet`);
+  if (input.harness === "claude-code") {
+    const result = await executeClaudeTask(common, { ...options.claude, env });
+    return { ...result, childSessionId: result.sessionId };
+  }
+  throw new Error("pi native execution is not available yet");
 }
 
 function workspaceChanged(before: RepoSignals, after: RepoSignals): boolean {

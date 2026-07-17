@@ -7,6 +7,7 @@ import type {
   RegisteredAgent,
 } from "@model-router/contracts";
 import { buildAutoTaskProfile, scoreAutoCandidates } from "@model-router/router-core";
+import { type ClaudeDiscoveryOptions, discoverClaudeModels } from "./claude-cli.js";
 import { type CodexDiscoveryOptions, discoverCodexModels } from "./codex-cli.js";
 import { assertRootInvocation, sanitizeText } from "./context-security.js";
 import { discoverOpenCodeModels, type OpenCodeDiscoveryOptions } from "./opencode-cli.js";
@@ -37,6 +38,7 @@ export interface HarnessRouteInput {
 export interface HarnessRouterOptions {
   codex?: CodexDiscoveryOptions;
   opencode?: OpenCodeDiscoveryOptions;
+  claude?: ClaudeDiscoveryOptions;
   repo?: RepoSignalOptions;
   state?: RouteStateOptions;
   env?: NodeJS.ProcessEnv;
@@ -146,15 +148,19 @@ async function discoverHarnessCandidates(
   if (harness === "opencode") {
     return discoverOpenCodeModels({ ...options.opencode, env });
   }
+  if (harness === "claude-code") {
+    return discoverClaudeModels({ ...options.claude, env });
+  }
   throw new Error(
-    `${harness} native catalog discovery is not available yet; use the compatibility gateway adapter`,
+    "pi native catalog discovery is not available yet; use the compatibility gateway adapter",
   );
 }
 
-function executionFor(harness: HarnessId): "codex-exec" | "opencode-run" {
+function executionFor(harness: HarnessId): "codex-exec" | "opencode-run" | "claude-print" {
   if (harness === "codex") return "codex-exec";
   if (harness === "opencode") return "opencode-run";
-  throw new Error(`No native execution adapter for ${harness}`);
+  if (harness === "claude-code") return "claude-print";
+  throw new Error("No native execution adapter for pi");
 }
 
 function resolveCurrentModel(

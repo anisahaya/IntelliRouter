@@ -25,7 +25,12 @@ assert.match(skill, /MODEL_ROUTER_CHILD_DEPTH/);
 const onboarding = readme.split(/^## Advanced self-hosting$/m)[0];
 assert.doesNotMatch(onboarding, /router\.config|MODEL_ROUTER_CONFIG|PROVIDER_[A-Z_]*API_KEY/);
 assert.match(onboarding, /retains the current host model as fallback/i);
-assert.match(readme, /OpenCode continues using its existing OAuth\/subscription credentials/i);
+assert.match(
+  readme,
+  /OpenCode and Claude Code continue using their existing OAuth\/subscription credentials/i,
+);
+assert.match(readme, /Native Codex, OpenCode, and Claude Code routing/i);
+assert.match(readme, /Pi CLI \| Compatibility gateway[\s\S]*Deferred/i);
 assert.match(readme, /OpenCode Desktop is not a target surface/i);
 
 process.stdout.write("product contract valid\n");

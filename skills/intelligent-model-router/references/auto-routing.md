@@ -2,7 +2,7 @@
 
 ## What it selects
 
-`route_harness_task` discovers the signed-in Codex or OpenCode catalog at call time through the selected harness CLI. It can therefore rank visible models added after this plugin was released while retaining the harness's subscription or OAuth authentication. It also ranks user agents explicitly registered by the host for the current task. It never fabricates unavailable choices.
+`route_harness_task` discovers the signed-in Codex or OpenCode catalog at call time through the selected harness CLI. For Claude Code, whose CLI does not expose a machine-readable picker, it uses the documented rolling model aliases and filters them through `availableModels` in user settings when configured. All three paths retain the harness's subscription or OAuth authentication. The router also ranks user agents explicitly registered by the host for the current task. It never fabricates arbitrary model IDs.
 
 When known, the current host model is excluded from ranking and reserved as the final fallback. The tool accepts either its exact ID or an unambiguous visible label such as `5.6 Sol Medium`, resolves it against the current catalog, and uses the canonical ID. Codex requires this label because it does not expose an authoritative current-model query to MCP; OpenCode may omit it. A model winner includes an exact supported reasoning effort. A user-agent winner must be invoked by the host because an MCP server cannot call native agent controls itself.
 
@@ -16,7 +16,7 @@ Repository inspection is bounded and metadata-only: language/file counts, manife
 
 ## Execution and fallback
 
-Model execution re-reads the live catalog immediately before launch and validates the exact model and effort. Codex uses an ephemeral `codex exec` child with its native sandbox. OpenCode uses `opencode run --pure` with its native signed-in provider, an injected least-privilege permission policy, and an exact `provider/model` plus variant. Both expose an allowlisted environment and set `MODEL_ROUTER_CHILD_DEPTH=1`.
+Model execution re-reads the available candidates immediately before launch and validates the exact model and effort. Codex uses an ephemeral `codex exec` child with its native sandbox. OpenCode uses `opencode run --pure` with its native signed-in provider, an injected least-privilege permission policy, and an exact `provider/model` plus variant. Claude Code uses `claude --print --safe-mode` with an exact alias and effort, no child MCP or skills, and a permission-specific built-in tool allowlist. All children expose an allowlisted environment and set `MODEL_ROUTER_CHILD_DEPTH=1`.
 
 Use `read-only` for analysis, reviews, and research. Use `workspace-write` only when the worker must implement changes. The requested workspace must be inside the MCP process's configured trusted root, which defaults to its working directory; set `MODEL_ROUTER_WORKSPACE_ROOT` deliberately when those differ. Concurrent routed write tasks for the same canonical workspace are rejected.
 

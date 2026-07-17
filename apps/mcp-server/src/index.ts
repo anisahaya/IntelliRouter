@@ -146,7 +146,7 @@ export function createMcpServer(
     "route_harness_task",
     {
       description:
-        "Discover the signed-in model catalog for Codex or OpenCode, combine bounded prompt/conversation/repository context, preserve task affinity, and return an inspectable native route.",
+        "Discover signed-in Codex/OpenCode models or Claude Code aliases, combine bounded prompt/conversation/repository context, preserve task affinity, and return an inspectable native route.",
       inputSchema: routeHarnessTaskInput,
       outputSchema: genericObjectOutput,
     },
@@ -162,7 +162,7 @@ export function createMcpServer(
     "delegate_harness_task",
     {
       description:
-        "Execute a prior native Codex or OpenCode route with exact model/effort revalidation, recursion prevention, bounded context, workspace controls, and partial-write detection.",
+        "Execute a prior native Codex, OpenCode, or Claude Code route with exact model/effort revalidation, recursion prevention, bounded context, workspace controls, and partial-write detection.",
       inputSchema: delegateHarnessTaskInput,
       outputSchema: genericObjectOutput,
     },

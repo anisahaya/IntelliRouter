@@ -2,6 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { ClaudeCommandRunner } from "../src/claude-cli.js";
 import { routeHarnessTask } from "../src/harness-router.js";
 import type { OpenCodeCommandRunner } from "../src/opencode-cli.js";
 import type { RepoCommandRunner } from "../src/repo-signals.js";
@@ -89,12 +90,19 @@ describe("harness-neutral routing", () => {
     expect(changedRequirements.affinityReused).toBe(false);
   });
 
-  it("reports unsupported native adapters and requires a current Codex fallback", async () => {
-    await expect(
-      routeHarnessTask({
-        harness: "pi",
-        objective: "Do work",
+  it("routes Claude Code through its signed-in model aliases", async () => {
+    const root = await mkdtemp(join(tmpdir(), "model-router-claude-route-"));
+    const claude: ClaudeCommandRunner = {
+      async execFile() {
+        return { stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) };
+      },
+    };
+    const result = await routeHarnessTask(
+      {
+        harness: "claude-code",
+        objective: "Review a complex architecture",
         workspaceRoot: process.cwd(),
+        profile: "quality",
         requirements: {
           tools: true,
           vision: false,
@@ -102,7 +110,16 @@ describe("harness-neutral routing", () => {
           edit: false,
           minimumContextTokens: 0,
         },
-      }),
-    ).rejects.toThrow("compatibility gateway");
+      },
+      {
+        claude: { runner: claude, availableModels: ["opus", "sonnet", "haiku"] },
+        repo: { runner: repo },
+        state: { path: join(root, "routes.jsonl") },
+      },
+    );
+    expect(result.selected).toMatchObject({
+      id: "opus",
+      execution: "claude-print",
+    });
   });
 });

@@ -126,7 +126,7 @@ export function affinityDecision(input: {
   profile: AutoRouteProfile;
   context: AutoRouteDecision["context"];
   fallbackModel?: string;
-  execution: "codex-exec" | "opencode-run";
+  execution: "codex-exec" | "opencode-run" | "claude-print";
 }): AutoRouteDecision | undefined {
   const selected = input.candidates.find(
     (candidate) => candidate.id === input.record.selectedCandidate,

@@ -46,8 +46,8 @@ program
   );
 program
   .command("route-native")
-  .description("Dry-run the signed-in Codex or OpenCode catalog with inspectable scores")
-  .requiredOption("--harness <harness>", "codex or opencode")
+  .description("Dry-run the signed-in Codex/OpenCode models or Claude Code aliases")
+  .requiredOption("--harness <harness>", "codex, opencode, or claude-code")
   .requiredOption("--objective <objective>")
   .option("--workspace <path>", "trusted workspace", process.cwd())
   .option("--current-model <model>")
