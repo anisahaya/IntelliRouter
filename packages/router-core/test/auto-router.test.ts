@@ -123,4 +123,24 @@ describe("automatic model routing", () => {
     expect(clampEffort("max", ["low", "high"])).toBe("high");
     expect(clampEffort("medium", ["low", "high"])).toBe("low");
   });
+
+  it("honors explicit hard capabilities instead of treating negated prompt words as requirements", () => {
+    const task = buildAutoTaskProfile({
+      objective: "Inspect only supplied metadata. Do not edit files, run tools, or use search.",
+      repoSignals: repo,
+      requirements: {
+        tools: false,
+        vision: false,
+        search: false,
+        edit: false,
+        minimumContextTokens: 0,
+      },
+    });
+    expect(task).toMatchObject({
+      toolsRequired: false,
+      visionRequired: false,
+      searchRequired: false,
+      editRequired: false,
+    });
+  });
 });
