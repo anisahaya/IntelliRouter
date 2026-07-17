@@ -26,8 +26,10 @@ Harness examples are available for [Codex](../../../examples/codex.config.toml),
 
 ## MCP model catalog
 
-Build the project before launching `.mcp.json`, which points to `dist/mcp-server/index.js`. Set `MODEL_ROUTER_BASE_URL` and, when configured, `MODEL_ROUTER_AUTH_TOKEN` in the MCP server environment. These tools are available only when that server is connected:
+Build the project before launching `.mcp.json`, which points to `dist/mcp-server/index.js`. Set the MCP working directory (or `MODEL_ROUTER_WORKSPACE_ROOT`) to the codebase the auto tools may inspect or edit. `MODEL_ROUTER_BASE_URL` and, when configured, `MODEL_ROUTER_AUTH_TOKEN` are needed only for the legacy external-provider tools. These tools are available only when that server is connected:
 
+- `auto_route` discovers and scores live Codex models with host-registered user agents;
+- `delegate_codex_task` revalidates and runs one exact Codex model and effort;
 - `route_task` asks the external configured router for a dry-run decision;
 - `delegate_task` sends one bounded prompt through the external proxy;
 - `explain_route`, `router_stats`, `submit_route_feedback`, and `list_router_models` inspect or update external backend state.

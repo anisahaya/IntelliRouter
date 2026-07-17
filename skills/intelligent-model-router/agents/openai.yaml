@@ -1,4 +1,4 @@
 interface:
   display_name: "Intelligent Model Router"
-  short_description: "Choose the best model across configured providers"
-  default_prompt: "Use $intelligent-model-router to compare every available configured model, select the best one for this task, and execute through it."
+  short_description: "Auto-select the best Codex model or user agent"
+  default_prompt: "Use $intelligent-model-router to choose the best live Codex model or exposed user agent for this task, select its reasoning effort, execute the bounded work, and verify the result."

@@ -1,7 +1,7 @@
 {
   "name": "model-router",
   "version": "0.1.0",
-  "description": "Choose the best model across configured providers with native fallbacks.",
+  "description": "Auto-select the best live Codex model or exposed user agent for each task.",
   "author": {
     "name": "Model Router contributors"
   },
@@ -10,15 +10,15 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Intelligent Model Router",
-    "shortDescription": "Choose the best model across providers.",
-    "longDescription": "Compare the configured cross-provider model catalog for each task, execute through the winning model, and fall back to host-native agents or the current model when the catalog is unavailable.",
+    "shortDescription": "Auto-select a Codex model or user agent.",
+    "longDescription": "Use the prompt, bounded conversation context, and repository metadata to choose a live Codex model, reasoning effort, or exposed user agent, with the current model as fallback.",
     "developerName": "Model Router contributors",
     "category": "Developer Tools",
-    "capabilities": ["Cross-provider routing", "Model comparison", "Bounded delegation"],
+    "capabilities": ["Live Codex model discovery", "User-agent routing", "Bounded delegation"],
     "defaultPrompt": [
-      "Choose the best model for this coding task.",
-      "Compare all configured models for this bounded task.",
-      "Keep this task on the selected model."
+      "Automatically choose the best model or user agent for this coding task.",
+      "Use conversation and repository context to route this bounded task.",
+      "Keep this task on the selected candidate."
     ]
   }
 }

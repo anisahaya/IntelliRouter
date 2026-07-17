@@ -1,36 +1,54 @@
 # Intelligent Model Router
 
-A skill that chooses the best model for a task across the providers configured in the model-router MCP catalog, then executes through that exact model. Host-native agents and the currently selected Codex model are fallback paths, not the primary candidate set.
+A Codex skill that acts like an auto-model mode. It uses the prompt, a bounded summary of the conversation, and privacy-safe repository metadata to rank every live model exposed by the signed-in Codex CLI alongside user agents exposed by the host. It selects both a candidate and reasoning effort, delegates the bounded task, and reserves the currently selected Codex model as the final fallback.
 
 The plugin owns the workflow. The self-hosted backend supplies cross-provider discovery, deterministic scoring, delegation, fallback, and privacy-safe SQLite telemetry. YAML remains an advanced setup concern rather than something users provide per task.
 
 ## Why this exists
 
-Coding work is a trajectory: tools, repository context, failures, follow-up turns, and task affinity matter. The router filters hard requirements, compares configured models using inspectable quality, cost, latency, health, and feedback signals, and keeps the selected model for the task.
+Coding work is a trajectory: tools, repository context, failures, follow-up turns, and task affinity matter. A static three-model list cannot represent what a signed-in Codex installation can actually run. The auto router reads the live catalog, filters hard requirements, scores task fit deterministically, and keeps the selected candidate for the task.
 
 ## Quick start
 
 Install the plugin from your Codex marketplace, or load this checkout as a local plugin. Then ask:
 
 ```text
-Use $intelligent-model-router to compare every configured model, choose the best one for this task, and execute through it.
+Use $intelligent-model-router to choose the best live Codex model or exposed user agent for this task, execute the bounded work, and verify it.
 ```
 
-When the model-router MCP is connected, the skill lists its catalog, evaluates every represented protocol, compares eligible candidate scores, and passes the winning logical model and protocol to `delegate_task`. Your manually selected Codex model orchestrates the workflow but does not restrict which configured backend model can win.
+The skill supplies routing instructions; the local MCP supplies live discovery and execution. For the auto path, build this repository and connect its MCP in Codex. If you already installed the Intellirouter MCP, update that existing entry rather than creating or deleting a second one:
 
-If the MCP catalog is unavailable or has no eligible model, the skill discovers host-native agents or model controls and finally falls back to the currently selected Codex model. The standalone selector in `skills/intelligent-model-router/scripts/select-native-route.mjs` makes that native fallback deterministic and testable.
+```bash
+pnpm install
+pnpm build
+```
+
+Set its command to `node`, its argument to the absolute `dist/mcp-server/index.js` path, and its working directory to the codebase it may inspect or edit. That working directory is the default trusted workspace root. If the server working directory must differ, set `MODEL_ROUTER_WORKSPACE_ROOT` explicitly to the allowed codebase. Restart the MCP after rebuilding. The optional legacy proxy environment variables are not required for `auto_route` or `delegate_codex_task`.
+
+Codex does not currently expose an authoritative current-model query to MCP. The visible model label must therefore be present in task context (for example, `5.6 Sol Medium`) so the router can reserve it as fallback. If the host does not provide that label, include it in the request once; an absent or ambiguous label safely disables auto-routing instead of risking recursive selection of the host model.
+
+When the local model-router MCP is connected, the skill calls `auto_route`. The server discovers the signed-in catalog with `codex debug models`, adds only the user agents the host actually exposes, derives task features from bounded context and repository metadata, and returns the winner plus reasoning effort. Codex-model winners run through a guarded `codex exec` child; user-agent winners run through native host delegation.
+
+Your manually selected model—Sol Medium, for example—does not limit which live model can win. It orchestrates the skill and becomes the fallback when no eligible candidate remains or delegation fails.
 
 ## Hybrid routing
 
 The normal product path is:
 
 ```text
-plugin skill -> list configured models -> score every supported protocol -> delegate to winner
+bounded task context + repository metadata
+                |
+                v
+plugin skill -> auto_route -> live Codex models + exposed user agents
+                |                         |
+                +-> codex-exec winner     +-> native-agent winner
+                |
+                +-> current model fallback
 ```
 
-Required tools, modality, context, output, protocol, and health are hard filters. The configured profile then compares quality, cost, latency, failures, and observable feedback. Because the proxy does not translate protocols, the skill queries each represented protocol and chooses the highest eligible score across the combined results.
+Required tools, vision, search, editing, and context size are hard filters. The selected profile then compares deterministic task fit, quality, speed, economy, and specialization. Exact ties break by candidate ID. The current model is excluded from ranking so it remains a genuine fallback.
 
-Only the context needed for a bounded objective is delegated. Credentials, secrets, and unrelated source must not be included. Native discovery is used only as the fallback path.
+Only the context needed for a bounded objective is delegated. The router never reads source contents to choose a model. It uses language/file counts, manifest names, test presence, and aggregate Git changes; ignores dependencies, build output, `.env*`, and symlinks; redacts common credential shapes; and caps all inputs and child outputs.
 
 ## Advanced self-hosting
 
@@ -58,9 +76,9 @@ Full skill-side setup and controls are documented in [advanced-self-hosting.md](
 
 ### MCP tools
 
-The repository keeps `.mcp.json` as an opt-in development artifact for the built external backend. It is intentionally not required by the plugin manifest. When connected, its six tools are `route_task`, `explain_route`, `router_stats`, `submit_route_feedback`, `list_router_models`, and `delegate_task`.
+The repository keeps `.mcp.json` as an opt-in development artifact for the built local server. It is intentionally not required by the plugin manifest. When connected, its eight tools include the primary `auto_route` and `delegate_codex_task` flow plus the six legacy self-hosting tools: `route_task`, `explain_route`, `router_stats`, `submit_route_feedback`, `list_router_models`, and `delegate_task`.
 
-The primary catalog flow calls `list_router_models`, calls `route_task` for each represented protocol, and sends the winning model and protocol to `delegate_task` with an explicit output-token cap. If the backend is unavailable, the skill continues through the host-native fallback path.
+`auto_route` reads the live Codex catalog and scores it together with registered agents. `delegate_codex_task` revalidates the exact model, reasoning effort, search/vision capabilities, trusted image paths, and workspace containment before starting an ephemeral process group with user configuration disabled, an allowlisted environment, bounded stdin context, and a recursion guard. The six original tools remain available for advanced external-provider routing.
 
 ### API
 
@@ -115,11 +133,13 @@ Additional limitations: health uses persisted recent-attempt windows and circuit
 ## Architecture
 
 ```text
-plugin skill -> MCP model catalog -> cross-protocol scoring -> delegate_task -> selected provider model
+plugin skill -> auto_route -> live Codex catalog + registered user agents
+     |              |                         |
+     |              +-> delegate_codex_task   +-> native host delegation
      |
-     +-> if unavailable: host-native agent/model -> current Codex model fallback
+     +-> if unavailable: current Codex model fallback
 
-external proxy -> configured providers + SQLite telemetry
+legacy self-hosting -> configured providers + SQLite telemetry
 ```
 
 ## Verification

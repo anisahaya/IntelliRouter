@@ -1,9 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod/v4";
+import type { AutoRouterOptions } from "./auto-router.js";
 import { ProxyClient } from "./client.js";
+import type { CodexExecOptions } from "./codex-exec.js";
 import {
+  autoRouteInput,
   createToolHandlers,
+  delegateCodexTaskInput,
   failure,
   genericObjectOutput,
   routeTaskInput,
@@ -11,9 +15,12 @@ import {
   success,
 } from "./tools.js";
 
-export function createMcpServer(client = new ProxyClient()): McpServer {
+export function createMcpServer(
+  client = new ProxyClient(),
+  options: { autoRouter?: AutoRouterOptions; codexExec?: CodexExecOptions } = {},
+): McpServer {
   const server = new McpServer({ name: "model-router", version: "0.1.0" });
-  const handlers = createToolHandlers(client);
+  const handlers = createToolHandlers(client, options);
   server.registerTool(
     "route_task",
     {
@@ -121,6 +128,38 @@ export function createMcpServer(client = new ProxyClient()): McpServer {
     async (input) => {
       try {
         return success(await handlers.delegate(input));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "auto_route",
+    {
+      description:
+        "Select the best live Codex model or registered native user agent from a sanitized objective, bounded conversation summary, and repository metadata.",
+      inputSchema: autoRouteInput,
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.autoRoute(input));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "delegate_codex_task",
+    {
+      description:
+        "Execute one bounded task with an exact live Codex model and reasoning effort selected by auto_route. Revalidates the catalog and prevents recursive routing.",
+      inputSchema: delegateCodexTaskInput,
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.delegateCodexTask(input));
       } catch (error) {
         return failure(error);
       }
