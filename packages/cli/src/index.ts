@@ -1,10 +1,14 @@
 import { Command } from "commander";
+import { routeHarnessTask } from "../../../apps/mcp-server/src/harness-router.js";
+import { getRouteRecord } from "../../../apps/mcp-server/src/route-state.js";
 import { initConfig } from "./config-init.js";
 import { doctor } from "./doctor.js";
 import { explainRoute } from "./explain.js";
 import { submitFeedback } from "./feedback.js";
+import { nativeDoctor } from "./native-doctor.js";
 import { routeTask } from "./route.js";
 import { serve } from "./serve.js";
+import { setupHarness } from "./setup.js";
 import { getStats } from "./stats.js";
 
 const program = new Command()
@@ -19,7 +23,67 @@ program
   .command("doctor")
   .option("--config <path>")
   .option("--probe")
-  .action(async (options) => print(await doctor(options.config, options.probe)));
+  .option("--harness <harness>", "codex, opencode, claude-code, pi, or all")
+  .action(async (options) =>
+    print(
+      options.harness
+        ? await nativeDoctor(options.harness)
+        : await doctor(options.config, options.probe),
+    ),
+  );
+program
+  .command("setup")
+  .option("--harness <harness>", "codex, opencode, claude-code, pi, or all", "all")
+  .option("--force", "replace an existing Codex MCP entry")
+  .option("--opencode-config <path>", "override the OpenCode config path")
+  .action(async (options) =>
+    print(
+      await setupHarness(options.harness, {
+        force: options.force,
+        configPath: options.opencodeConfig,
+      }),
+    ),
+  );
+program
+  .command("route-native")
+  .description("Dry-run the signed-in Codex/OpenCode models or Claude Code aliases")
+  .requiredOption("--harness <harness>", "codex, opencode, or claude-code")
+  .requiredOption("--objective <objective>")
+  .option("--workspace <path>", "trusted workspace", process.cwd())
+  .option("--current-model <model>")
+  .option("--session <id>")
+  .option("--profile <profile>", "balanced, quality, economy, or speed", "balanced")
+  .option("--edit")
+  .option("--vision")
+  .option("--search")
+  .option("--minimum-context <tokens>", "minimum context tokens", Number, 0)
+  .action(async (options) =>
+    print(
+      await routeHarnessTask({
+        harness: options.harness,
+        objective: options.objective,
+        workspaceRoot: options.workspace,
+        currentModel: options.currentModel,
+        sessionId: options.session,
+        profile: options.profile,
+        requirements: {
+          tools: true,
+          edit: Boolean(options.edit),
+          vision: Boolean(options.vision),
+          search: Boolean(options.search),
+          minimumContextTokens: options.minimumContext,
+        },
+      }),
+    ),
+  );
+program
+  .command("explain-native <route-id>")
+  .description("Read persisted privacy-safe native route diagnostics")
+  .action(async (routeId) => {
+    const route = await getRouteRecord(routeId);
+    if (!route) throw new Error(`Unknown harness route: ${routeId}`);
+    print(route);
+  });
 program
   .command("route")
   .requiredOption("--task <task>")

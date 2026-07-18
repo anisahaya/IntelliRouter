@@ -59,6 +59,8 @@ export async function autoRoute(
   );
   const winner = ranked[0];
   return {
+    affinityReused: false,
+    status: "planned",
     selected: winner
       ? {
           id: winner.id,
@@ -86,7 +88,7 @@ function resolveCurrentModel(
   models: AutoCandidate[],
 ): string | undefined {
   if (!value) return undefined;
-  const normalized = normalizeModelLabel(value).replace(/(?:low|medium|high|xhigh|max)$/, "");
+  const normalized = normalizeModelLabel(value).replace(/(?:low|medium|high|xhigh|max|ultra)$/, "");
   return models.find((model) =>
     [model.id, model.displayName].some((label) => {
       const candidate = normalizeModelLabel(label);

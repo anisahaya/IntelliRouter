@@ -1,20 +1,13 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "model-router": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Local Intelligent Model Router",
-      "options": {
-        "baseURL": "http://127.0.0.1:8856/v1",
-        "apiKey": "{env:MODEL_ROUTER_AUTH_TOKEN}"
-      },
-      "models": {
-        "auto": {
-          "name": "Automatic router selection",
-          "limit": { "context": 200000, "output": 8192 }
-        }
-      }
-    }
+  "skills": {
+    "paths": ["/absolute/path/to/model-router/skills"]
   },
-  "model": "model-router/auto"
+  "mcp": {
+    "model-router": {
+      "type": "local",
+      "command": ["node", "/absolute/path/to/model-router/dist/mcp-server/index.js"],
+      "enabled": true
+    }
+  }
 }

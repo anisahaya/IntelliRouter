@@ -22,6 +22,11 @@ const repoSignals: RepoSignals = {
   monorepo: false,
   dirty: false,
   truncated: false,
+  changedFiles: [],
+  topLevelDirectories: [],
+  dependencyNames: [],
+  packageCount: 1,
+  hasCi: false,
 };
 
 beforeAll(async () => {

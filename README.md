@@ -1,8 +1,8 @@
 # Intelligent Model Router
 
-A Codex skill that acts like an auto-model mode. It uses the prompt, a bounded summary of the conversation, and privacy-safe repository metadata to rank every live model exposed by the signed-in Codex CLI alongside user agents exposed by the host. It selects both a candidate and reasoning effort, delegates the bounded task, and reserves the currently selected Codex model as the final fallback.
+A cross-harness skill and local MCP that act like an auto-model mode. It uses the prompt, a bounded conversation summary, and privacy-safe repository metadata to rank models exposed by the signed-in Codex, OpenCode, or Claude Code CLI. It selects an exact model and reasoning effort, delegates through that same harness and subscription, persists task affinity, and retains the current host model as fallback.
 
-The plugin owns the workflow. The self-hosted backend supplies cross-provider discovery, deterministic scoring, delegation, fallback, and privacy-safe SQLite telemetry. YAML remains an advanced setup concern rather than something users provide per task.
+The plugin owns the workflow. Native Codex, OpenCode, and Claude Code routing needs no separate provider key, YAML, or proxy. The separate self-hosted gateway remains available for Pi and cross-provider API compatibility.
 
 ## Why this exists
 
@@ -10,24 +10,41 @@ Coding work is a trajectory: tools, repository context, failures, follow-up turn
 
 ## Quick start
 
-Install the plugin from your Codex marketplace, or load this checkout as a local plugin. Then ask:
-
-```text
-Use $intelligent-model-router to choose the best live Codex model or exposed user agent for this task, execute the bounded work, and verify it.
-```
-
-The skill supplies routing instructions; the local MCP supplies live discovery and execution. For the auto path, build this repository and connect its MCP in Codex. If you already installed the Intellirouter MCP, update that existing entry rather than creating or deleting a second one:
+Install the package (or build this checkout), then configure every detected native harness:
 
 ```bash
-pnpm install
-pnpm build
+npm install -g ./model-router-0.1.0.tgz
+model-router setup --harness all
+model-router doctor --harness all
 ```
 
-Set its command to `node`, its argument to the absolute `dist/mcp-server/index.js` path, and its working directory to the codebase it may inspect or edit. That working directory is the default trusted workspace root. If the server working directory must differ, set `MODEL_ROUTER_WORKSPACE_ROOT` explicitly to the allowed codebase. Restart the MCP after rebuilding. The optional legacy proxy environment variables are not required for `auto_route` or `delegate_codex_task`.
+During local development, run `pnpm build` and `node dist/cli/index.js setup --harness all`. Restart Codex, OpenCode, or Claude Code after setup, then ask:
+
+```text
+Use $intelligent-model-router to choose the best live model for this task, execute the bounded work, and verify it.
+```
+
+`setup` registers the bundled MCP and portable skill. It does not change the selected model, provider, or authentication. OpenCode and Claude Code continue using their existing OAuth/subscription credentials. The optional legacy proxy variables are not required for `route_harness_task` or `delegate_harness_task`.
+
+By default, each MCP launch trusts the harness's active working directory. Set `MODEL_ROUTER_WORKSPACE_ROOT` only when the MCP process must start elsewhere and you deliberately want to pin a broader or different trusted root.
 
 Codex does not currently expose an authoritative current-model query to MCP. The visible model label must therefore be present in task context (for example, `5.6 Sol Medium`) so the router can reserve it as fallback. If the host does not provide that label, include it in the request once; an absent or ambiguous label safely disables auto-routing instead of risking recursive selection of the host model.
 
-When the local model-router MCP is connected, the skill calls `auto_route`. The server discovers the signed-in catalog with `codex debug models`, adds only the user agents the host actually exposes, derives task features from bounded context and repository metadata, and returns the winner plus reasoning effort. Codex-model winners run through a guarded `codex exec` child; user-agent winners run through native host delegation.
+When connected, the skill calls `route_harness_task`. The server discovers through `codex debug models`, `opencode models --verbose`, or the signed-in Claude Code model aliases allowed by settings. It derives task features from bounded context and repository metadata and returns the winner plus effort. Winners run through guarded `codex exec`, `opencode run`, or `claude --print` children. Existing Codex-only `auto_route` and `delegate_codex_task` tools remain during migration.
+
+Claude Code does not expose a machine-readable live model picker. The native adapter therefore uses its documented rolling aliases (`opus`, `sonnet`, and `haiku`) and honors `availableModels` from user settings when present. Execution revalidates the alias through Claude Code itself; unavailable account entitlements fail safely back to the current host model.
+
+## Harness status
+
+| Priority | Harness | Native catalog | Native execution | Authentication | Status |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Codex app | Codex CLI | `codex exec` | Existing ChatGPT/Codex sign-in | Ready |
+| 2 | Codex CLI | Codex CLI | `codex exec` | Existing ChatGPT/Codex sign-in | Ready |
+| 3 | Claude Code CLI | Signed-in aliases and `availableModels` | `claude --print` | Existing Claude Code sign-in | Ready; live invocation still requires available usage |
+| 4 | OpenCode CLI | OpenCode CLI | `opencode run` | Existing OpenCode OAuth/subscription | Ready |
+| 5 | Pi CLI | Compatibility gateway | OpenAI-compatible | Provider/gateway credentials | Deferred; native adapter planned later |
+
+OpenCode Desktop is not a target surface; OpenCode CLI is.
 
 Your manually selected model—Sol Medium, for example—does not limit which live model can win. It orchestrates the skill and becomes the fallback when no eligible candidate remains or delegation fails.
 
@@ -39,9 +56,9 @@ The normal product path is:
 bounded task context + repository metadata
                 |
                 v
-plugin skill -> auto_route -> live Codex models + exposed user agents
-                |                         |
-                +-> codex-exec winner     +-> native-agent winner
+portable skill -> route_harness_task -> signed-in harness models + exposed agents
+                |                                      |
+                +-> Codex/OpenCode/Claude child        +-> native-agent winner
                 |
                 +-> current model fallback
 ```
@@ -76,9 +93,9 @@ Full skill-side setup and controls are documented in [advanced-self-hosting.md](
 
 ### MCP tools
 
-The repository keeps `.mcp.json` as an opt-in development artifact for the built local server. It is intentionally not required by the plugin manifest. When connected, its eight tools include the primary `auto_route` and `delegate_codex_task` flow plus the six legacy self-hosting tools: `route_task`, `explain_route`, `router_stats`, `submit_route_feedback`, `list_router_models`, and `delegate_task`.
+The primary tools are `route_harness_task`, `delegate_harness_task`, `explain_harness_route`, and `submit_harness_feedback`. The Codex-only pair and six legacy gateway tools remain for backward compatibility.
 
-`auto_route` reads the live Codex catalog and scores it together with registered agents. `delegate_codex_task` revalidates the exact model, reasoning effort, search/vision capabilities, trusted image paths, and workspace containment before starting an ephemeral process group with user configuration disabled, an allowlisted environment, bounded stdin context, and a recursion guard. The six original tools remain available for advanced external-provider routing.
+Routes contain a UUID, harness/session identity, selected candidate/effort, fallback, bounded feature summary, affinity state, and outcome. Raw prompts and conversations are not persisted. Delegation revalidates the catalog and route, prevents recursion, bounds context/output, contains process trees, locks writers, and reports whether a failed write left the workspace unsafe for automatic fallback.
 
 ### API
 
@@ -106,7 +123,7 @@ A model `id` is the logical alias callers pin. `upstreamModel` is the provider's
 
 The proxy normalizes enough metadata to detect required protocol, tools, JSON output, vision, streaming, and context size. Ineligible configured models are excluded before deterministic scoring. Explicit opaque sessions retain the selected model until affinity expires or it becomes ineligible or unhealthy.
 
-Configured timeouts, network failures, rate limits, overloads, and upstream 5xx responses can fall back to the next candidate only before any response byte is emitted. Feedback is an explicit, inspectable prior; there is no opaque training in v0.1.
+Native delegation defaults to 120 seconds for small or mechanical work and 300 seconds for repository-scale read-only review, debugging, and general tasks; callers may set an explicit timeout up to 600 seconds. Configured timeouts, network failures, rate limits, overloads, and upstream 5xx responses can fall back to the next candidate only before any response byte is emitted. Feedback is an explicit, inspectable prior; there is no opaque training in v0.1.
 
 ### Privacy and security
 
@@ -122,6 +139,10 @@ model-router explain <route-id>
 model-router stats [--since ISO_TIMESTAMP] [--model alias] [--task type]
 model-router feedback <route-id> --outcome success [--score 1] [--tag accepted]
 model-router config init [path]
+model-router setup --harness codex|opencode|claude-code|all [--force]
+model-router doctor --harness codex|opencode|claude-code|all
+model-router route-native --harness codex|opencode|claude-code --objective "..." [--current-model "..."]
+model-router explain-native <route-id>
 ```
 
 ### Supported v0.1 proxy subset
@@ -133,9 +154,9 @@ Additional limitations: health uses persisted recent-attempt windows and circuit
 ## Architecture
 
 ```text
-plugin skill -> auto_route -> live Codex catalog + registered user agents
-     |              |                         |
-     |              +-> delegate_codex_task   +-> native host delegation
+portable skill -> route_harness_task -> Codex/OpenCode catalog or Claude aliases
+     |                     |
+     |                     +-> delegate_harness_task
      |
      +-> if unavailable: current Codex model fallback
 

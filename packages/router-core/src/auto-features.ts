@@ -56,18 +56,10 @@ export function buildAutoTaskProfile(input: AutoFeatureInput): AutoTaskProfile {
         0.1 -
       mechanical * 0.18,
   );
-  const visionRequired =
-    input.requirements.vision || /\b(image|screenshot|visual|diagram|photo)\b/.test(weighted);
-  const searchRequired =
-    input.requirements.search ||
-    /\b(latest|current|web|internet|research|documentation)\b/.test(weighted);
-  const editRequired =
-    input.requirements.edit ||
-    /\b(implement|edit|change|fix|build|create|write|refactor)\b/.test(objective);
-  const toolsRequired =
-    input.requirements.tools ||
-    editRequired ||
-    /\b(run|test|inspect|repository|codebase|git)\b/.test(weighted);
+  const visionRequired = input.requirements.vision;
+  const searchRequired = input.requirements.search;
+  const editRequired = input.requirements.edit;
+  const toolsRequired = input.requirements.tools || editRequired;
   const estimatedContextTokens = Math.max(
     input.requirements.minimumContextTokens,
     Math.ceil((input.objective.length + (input.conversationSummary?.length ?? 0)) / 4) +
@@ -123,6 +115,7 @@ function effortFor(
   mechanical: number,
 ): ReasoningEffort {
   const demand = clamp(complexity * 0.5 + ambiguity * 0.25 + risk * 0.35 - mechanical * 0.18);
+  if (demand >= 0.96) return "ultra";
   if (demand >= 0.86) return "max";
   if (demand >= 0.68) return "xhigh";
   if (demand >= 0.48) return "high";

@@ -1,7 +1,22 @@
 import { z } from "zod";
 
-export const reasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export const reasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]);
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
+
+export const harnessIdSchema = z.enum(["codex", "opencode", "claude-code", "pi"]);
+export type HarnessId = z.infer<typeof harnessIdSchema>;
+
+export const routeOutcomeSchema = z.enum([
+  "planned",
+  "running",
+  "success",
+  "failure",
+  "timed-out",
+  "fallback",
+  "corrected",
+  "abandoned",
+]);
+export type RouteOutcome = z.infer<typeof routeOutcomeSchema>;
 
 export const autoRouteProfileSchema = z.enum(["balanced", "quality", "economy", "speed"]);
 export type AutoRouteProfile = z.infer<typeof autoRouteProfileSchema>;
@@ -19,6 +34,11 @@ export const repoSignalsSchema = z.object({
   monorepo: z.boolean(),
   dirty: z.boolean(),
   truncated: z.boolean().default(false),
+  changedFiles: z.array(z.string()).max(128).default([]),
+  topLevelDirectories: z.array(z.string()).max(64).default([]),
+  dependencyNames: z.array(z.string()).max(128).default([]),
+  packageCount: z.number().int().nonnegative().default(0),
+  hasCi: z.boolean().default(false),
 });
 export type RepoSignals = z.infer<typeof repoSignalsSchema>;
 
@@ -59,7 +79,8 @@ export type AutoCapabilities = z.infer<typeof autoCapabilitiesSchema>;
 
 export const autoCandidateSchema = z.object({
   id: z.string().min(1),
-  kind: z.enum(["codex-model", "user-agent"]),
+  kind: z.enum(["codex-model", "harness-model", "user-agent"]),
+  harness: harnessIdSchema.optional(),
   displayName: z.string().min(1),
   description: z.string().default(""),
   available: z.boolean(),
@@ -74,7 +95,7 @@ export type AutoCandidate = z.infer<typeof autoCandidateSchema>;
 
 export const autoRankedCandidateSchema = z.object({
   id: z.string(),
-  kind: z.enum(["codex-model", "user-agent"]),
+  kind: z.enum(["codex-model", "harness-model", "user-agent"]),
   displayName: z.string(),
   reasoningEffort: reasoningEffortSchema.optional(),
   scores: z.object({
@@ -89,13 +110,19 @@ export const autoRankedCandidateSchema = z.object({
 export type AutoRankedCandidate = z.infer<typeof autoRankedCandidateSchema>;
 
 export const autoRouteDecisionSchema = z.object({
+  routeId: z.string().uuid().optional(),
+  harness: harnessIdSchema.optional(),
+  sessionId: z.string().optional(),
+  taskFingerprint: z.string().optional(),
+  affinityReused: z.boolean().default(false),
+  status: routeOutcomeSchema.default("planned"),
   selected: z
     .object({
       id: z.string(),
-      kind: z.enum(["codex-model", "user-agent"]),
+      kind: z.enum(["codex-model", "harness-model", "user-agent"]),
       displayName: z.string(),
       reasoningEffort: reasoningEffortSchema.optional(),
-      execution: z.enum(["codex-exec", "native-agent"]),
+      execution: z.enum(["codex-exec", "opencode-run", "claude-print", "native-agent"]),
     })
     .nullable(),
   profile: autoRouteProfileSchema,
@@ -103,10 +130,39 @@ export const autoRouteDecisionSchema = z.object({
   repoSignals: repoSignalsSchema,
   ranked: z.array(autoRankedCandidateSchema),
   excluded: z.array(z.object({ id: z.string(), reasons: z.array(z.string()) })),
-  fallback: z.object({ kind: z.literal("current-model"), model: z.string().optional() }),
+  fallback: z.object({
+    kind: z.literal("current-model"),
+    model: z.string().optional(),
+    harness: harnessIdSchema.optional(),
+  }),
   context: z.object({ objectiveTruncated: z.boolean(), conversationTruncated: z.boolean() }),
 });
 export type AutoRouteDecision = z.infer<typeof autoRouteDecisionSchema>;
+
+export const harnessRouteRecordSchema = z.object({
+  routeId: z.string().uuid(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  harness: harnessIdSchema,
+  sessionHash: z.string().optional(),
+  taskFingerprint: z.string(),
+  workspaceFingerprint: z.string(),
+  selectedCandidate: z.string().optional(),
+  reasoningEffort: reasoningEffortSchema.optional(),
+  fallbackModel: z.string().optional(),
+  profile: autoRouteProfileSchema,
+  outcome: routeOutcomeSchema,
+  rerouteReason: z.string().max(512).optional(),
+  featureSummary: z.object({
+    taskType: z.string(),
+    complexity: z.number(),
+    risk: z.number(),
+    scope: z.string(),
+    requiredCapabilities: z.array(z.string()),
+  }),
+  partialWriteDetected: z.boolean().default(false),
+});
+export type HarnessRouteRecord = z.infer<typeof harnessRouteRecordSchema>;
 
 export const registeredAgentSchema = z.object({
   id: z.string().min(1).max(128),

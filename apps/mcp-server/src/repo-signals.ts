@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { readdir, realpath, stat } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { basename, extname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { RepoSignals } from "@model-router/contracts";
 
@@ -68,6 +68,10 @@ export async function collectRepoSignals(
   const queue: Array<{ path: string; depth: number }> = [{ path: workspace, depth: 0 }];
   const languages = new Map<string, number>();
   const manifests = new Set<string>();
+  const dependencyNames = new Set<string>();
+  const topLevelDirectories = new Set<string>();
+  let packageCount = 0;
+  let hasCi = false;
   let fileCount = 0;
   let testFileCount = 0;
   let directoryCount = 0;
@@ -90,6 +94,8 @@ export async function collectRepoSignals(
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         if (ignoredDirectories.has(entry.name) || entry.name.startsWith(".env")) continue;
+        if (current.depth === 0) topLevelDirectories.add(entry.name);
+        if (current.depth === 0 && entry.name === ".github") hasCi = true;
         if (current.depth >= maxDepth) {
           truncated = true;
           continue;
@@ -104,7 +110,13 @@ export async function collectRepoSignals(
         queue.length = 0;
         break;
       }
-      if (manifestNames.has(entry.name)) manifests.add(entry.name);
+      if (manifestNames.has(entry.name)) {
+        manifests.add(entry.name);
+        packageCount++;
+        if (entry.name === "package.json") {
+          await collectPackageDependencies(join(current.path, entry.name), dependencyNames);
+        }
+      }
       if (/(?:^|[._-])(?:test|spec)(?:[._-]|$)|^tests?$/i.test(entry.name)) testFileCount++;
       const language = languageByExtension[extname(entry.name).toLowerCase()];
       if (language) languages.set(language, (languages.get(language) ?? 0) + 1);
@@ -127,7 +139,30 @@ export async function collectRepoSignals(
     monorepo: manifests.has("pnpm-workspace.yaml"),
     dirty: git.changedFileCount > 0,
     truncated,
+    changedFiles: git.changedFiles,
+    topLevelDirectories: [...topLevelDirectories].sort().slice(0, 64),
+    dependencyNames: [...dependencyNames].sort().slice(0, 128),
+    packageCount,
+    hasCi,
   };
+}
+
+async function collectPackageDependencies(path: string, target: Set<string>): Promise<void> {
+  try {
+    const source = await readFile(path, "utf8");
+    if (source.length > 512 * 1024) return;
+    const parsed = JSON.parse(source) as Record<string, unknown>;
+    for (const field of ["dependencies", "devDependencies", "peerDependencies"]) {
+      const values = parsed[field];
+      if (!values || typeof values !== "object" || Array.isArray(values)) continue;
+      for (const name of Object.keys(values)) {
+        if (target.size >= 128) return;
+        target.add(name.slice(0, 128));
+      }
+    }
+  } catch {
+    // Invalid or unreadable manifests do not prevent routing.
+  }
 }
 
 async function collectGitSignals(root: string, runner: RepoCommandRunner) {
@@ -140,7 +175,13 @@ async function collectGitSignals(root: string, runner: RepoCommandRunner) {
       ),
       runner.execFile("git", ["diff", "--numstat", "--no-renames", "--", "."], gitOptions(root)),
     ]);
-    const changedFileCount = statusResult.stdout.split("\n").filter(Boolean).length;
+    const statusLines = statusResult.stdout.split("\n").filter(Boolean);
+    const changedFileCount = statusLines.length;
+    const changedFiles = statusLines
+      .map((line) => line.slice(3).split(" -> ").at(-1) ?? "")
+      .map((path) => relative(root, join(root, path)).replaceAll("\\", "/"))
+      .filter((path) => path && !path.startsWith(".."))
+      .slice(0, 128);
     let diffInsertions = 0;
     let diffDeletions = 0;
     for (const line of diffResult.stdout.split("\n")) {
@@ -148,9 +189,9 @@ async function collectGitSignals(root: string, runner: RepoCommandRunner) {
       if (insertions && /^\d+$/.test(insertions)) diffInsertions += Number(insertions);
       if (deletions && /^\d+$/.test(deletions)) diffDeletions += Number(deletions);
     }
-    return { changedFileCount, diffInsertions, diffDeletions };
+    return { changedFileCount, changedFiles, diffInsertions, diffDeletions };
   } catch {
-    return { changedFileCount: 0, diffInsertions: 0, diffDeletions: 0 };
+    return { changedFileCount: 0, changedFiles: [], diffInsertions: 0, diffDeletions: 0 };
   }
 }
 

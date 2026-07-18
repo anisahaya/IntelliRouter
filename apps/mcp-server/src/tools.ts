@@ -1,6 +1,7 @@
 import {
   autoRouteProfileSchema,
   autoRouteRequirementsSchema,
+  harnessIdSchema,
   reasoningEffortSchema,
   registeredAgentSchema,
   repoSignalsSchema,
@@ -9,6 +10,9 @@ import { z } from "zod/v4";
 import { type AutoRouterOptions, autoRoute } from "./auto-router.js";
 import type { ProxyClient } from "./client.js";
 import { type CodexExecOptions, executeCodexTask } from "./codex-exec.js";
+import { executeHarnessTask, type HarnessExecOptions } from "./harness-exec.js";
+import { type HarnessRouterOptions, routeHarnessTask } from "./harness-router.js";
+import { getRouteRecord, updateRouteOutcome } from "./route-state.js";
 
 export const routeTaskInput = {
   task: z.string().min(1).max(32_000),
@@ -81,12 +85,53 @@ export const delegateCodexTaskInput = {
   repoSignals: repoSignalsSchema,
   workspaceRoot: z.string().min(1).max(4_096),
   permission: z.enum(["read-only", "workspace-write"]).default("read-only"),
-  timeoutMs: z.number().int().min(1_000).max(600_000).default(120_000),
+  timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
+};
+
+export const routeHarnessTaskInput = {
+  harness: harnessIdSchema,
+  objective: z.string().min(1).max(32_000),
+  conversationSummary: z.string().max(16_000).optional(),
+  workspaceRoot: z.string().min(1).max(4_096),
+  registeredAgents: z.array(registeredAgentSchema).max(32).default([]),
+  profile: autoRouteProfileSchema.default("balanced"),
+  currentModel: z.string().min(1).max(256).optional(),
+  sessionId: z.string().min(1).max(512).optional(),
+  forceReroute: z.boolean().default(false),
+  requirements: autoRouteRequirementsSchema.default({
+    tools: true,
+    vision: false,
+    search: false,
+    edit: false,
+    minimumContextTokens: 0,
+  }),
+};
+
+export const delegateHarnessTaskInput = {
+  routeId: z.string().uuid(),
+  harness: harnessIdSchema,
+  model: z.string().min(1).max(256),
+  reasoningEffort: reasoningEffortSchema,
+  objective: z.string().min(1).max(32_000),
+  conversationSummary: z.string().max(16_000).optional(),
+  acceptanceChecks: z.array(z.string().max(1_000)).max(32).default([]),
+  searchRequired: z.boolean().default(false),
+  visionRequired: z.boolean().default(false),
+  imagePaths: z.array(z.string().min(1).max(4_096)).max(8).default([]),
+  repoSignals: repoSignalsSchema,
+  workspaceRoot: z.string().min(1).max(4_096),
+  permission: z.enum(["read-only", "workspace-write"]).default("read-only"),
+  timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
 };
 
 export function createToolHandlers(
   client: ProxyClient,
-  options: { autoRouter?: AutoRouterOptions; codexExec?: CodexExecOptions } = {},
+  options: {
+    autoRouter?: AutoRouterOptions;
+    codexExec?: CodexExecOptions;
+    harnessRouter?: HarnessRouterOptions;
+    harnessExec?: HarnessExecOptions;
+  } = {},
 ) {
   return {
     routeTask: async (input: {
@@ -175,6 +220,29 @@ export function createToolHandlers(
     }),
     delegateCodexTask: async (input: Parameters<typeof executeCodexTask>[0]) => ({
       result: await executeCodexTask(input, options.codexExec),
+    }),
+    routeHarnessTask: async (input: Parameters<typeof routeHarnessTask>[0]) => ({
+      result: await routeHarnessTask(input, options.harnessRouter),
+    }),
+    delegateHarnessTask: async (input: Parameters<typeof executeHarnessTask>[0]) => ({
+      result: await executeHarnessTask(input, options.harnessExec),
+    }),
+    explainHarnessRoute: async (routeId: string) => {
+      const result = await getRouteRecord(routeId, options.harnessRouter?.state);
+      if (!result) throw new Error(`Unknown harness route: ${routeId}`);
+      return { result };
+    },
+    submitHarnessFeedback: async (input: {
+      routeId: string;
+      outcome: "success" | "failure" | "corrected" | "abandoned";
+      reason?: string;
+    }) => ({
+      result: await updateRouteOutcome(
+        input.routeId,
+        input.outcome,
+        { rerouteReason: input.reason },
+        options.harnessRouter?.state,
+      ),
     }),
   };
 }

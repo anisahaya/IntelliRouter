@@ -6,7 +6,7 @@ import type {
   ReasoningEffort,
 } from "@model-router/contracts";
 
-const effortOrder: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
+const effortOrder: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
 
 const weights: Record<
   AutoRouteProfile,
@@ -57,7 +57,7 @@ export function scoreAutoCandidates(
       kind: candidate.kind,
       displayName: candidate.displayName,
       reasoningEffort:
-        candidate.kind === "codex-model"
+        candidate.kind !== "user-agent"
           ? clampEffort(task.desiredEffort, candidate.supportedEfforts ?? [])
           : undefined,
       scores: {
@@ -102,9 +102,9 @@ function exclusions(
 ): string[] {
   const reasons: string[] = [];
   if (!candidate.available) reasons.push("unavailable");
-  if (candidate.kind === "codex-model" && candidate.supportedEfforts?.length === 0)
+  if (candidate.kind !== "user-agent" && candidate.supportedEfforts?.length === 0)
     reasons.push("no supported reasoning effort");
-  if (candidate.kind === "codex-model" && currentModel && candidate.id === currentModel)
+  if (candidate.kind !== "user-agent" && currentModel && candidate.id === currentModel)
     reasons.push("reserved as the current-model fallback");
   if (task.toolsRequired && !candidate.capabilities.tools) reasons.push("tools are unsupported");
   if (task.visionRequired && !candidate.capabilities.vision) reasons.push("vision is unsupported");

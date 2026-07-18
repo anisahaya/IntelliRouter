@@ -1,7 +1,7 @@
 {
   "name": "model-router",
-  "version": "0.1.0",
-  "description": "Auto-select the best live Codex model or exposed user agent for each task.",
+  "version": "0.1.0+codex.20260717230602",
+  "description": "Auto-select and execute the best signed-in model across Codex, OpenCode, and Claude Code.",
   "author": {
     "name": "Model Router contributors"
   },
@@ -10,13 +10,13 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Intelligent Model Router",
-    "shortDescription": "Auto-select a Codex model or user agent.",
-    "longDescription": "Use the prompt, bounded conversation context, and repository metadata to choose a live Codex model, reasoning effort, or exposed user agent, with the current model as fallback.",
+    "shortDescription": "Auto-route tasks across coding harness models.",
+    "longDescription": "Use bounded prompt, conversation, and repository context to choose a signed-in Codex, OpenCode, or Claude Code model and reasoning effort, preserve task affinity, and keep the current model as fallback.",
     "developerName": "Model Router contributors",
     "category": "Developer Tools",
-    "capabilities": ["Live Codex model discovery", "User-agent routing", "Bounded delegation"],
+    "capabilities": ["Live harness model discovery", "Task affinity", "Bounded native delegation"],
     "defaultPrompt": [
-      "Automatically choose the best model or user agent for this coding task.",
+      "Automatically choose the best signed-in model for this coding task.",
       "Use conversation and repository context to route this bounded task.",
       "Keep this task on the selected candidate."
     ]
