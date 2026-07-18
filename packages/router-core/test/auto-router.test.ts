@@ -91,6 +91,72 @@ describe("automatic model routing", () => {
     ]);
   });
 
+  it("uses only sufficiently sampled, capped, and decayed observed priors", () => {
+    const task = buildAutoTaskProfile({
+      objective: "Implement a complex multi-file feature",
+      repoSignals: repo,
+      requirements: {
+        tools: true,
+        vision: false,
+        search: false,
+        edit: true,
+        minimumContextTokens: 0,
+      },
+    });
+    const now = Date.parse("2026-07-18T12:00:00.000Z");
+    const candidates = [candidate({ id: "learned" }), candidate({ id: "baseline" })];
+    const sparse = scoreAutoCandidates(candidates, task, "balanced", undefined, {
+      learned: {
+        successRate: 1,
+        averageLatencyMs: 1,
+        feedbackPrior: 1,
+        attemptSamples: 2,
+        feedbackSamples: 1,
+        lastObservedAt: new Date(now).toISOString(),
+      },
+    });
+    expect(sparse.ranked.find((item) => item.id === "learned")?.scores.observedAdjustment).toBe(0);
+
+    const learned = scoreAutoCandidates(
+      candidates,
+      task,
+      "balanced",
+      undefined,
+      {
+        learned: {
+          successRate: 1,
+          averageLatencyMs: 1,
+          feedbackPrior: 1,
+          attemptSamples: 100,
+          feedbackSamples: 100,
+          lastObservedAt: new Date(now).toISOString(),
+        },
+      },
+      { now },
+    );
+    expect(learned.ranked[0]?.id).toBe("learned");
+    expect(learned.ranked[0]?.scores.observedAdjustment).toBeLessThanOrEqual(0.08);
+
+    const decayed = scoreAutoCandidates(
+      candidates,
+      task,
+      "balanced",
+      undefined,
+      {
+        learned: {
+          successRate: 1,
+          averageLatencyMs: 1,
+          feedbackPrior: 1,
+          attemptSamples: 100,
+          feedbackSamples: 100,
+          lastObservedAt: new Date(now - 60 * 24 * 60 * 60 * 1_000).toISOString(),
+        },
+      },
+      { now },
+    );
+    expect(decayed.ranked[0]?.scores.observedAdjustment).toBeCloseTo(0.02, 5);
+  });
+
   it("reserves the host model for fallback and enforces hard capabilities", () => {
     const task = buildAutoTaskProfile({
       objective: "Inspect this screenshot and edit the repository",

@@ -26,6 +26,7 @@ export interface OpenCodeTaskInput {
   repoSignals: RepoSignals;
   workspaceRoot: string;
   permission: "read-only" | "workspace-write";
+  resumeSessionId?: string;
   timeoutMs?: number;
 }
 
@@ -101,6 +102,7 @@ export async function executeOpenCodeTask(
     input.reasoningEffort,
     "--dir",
     workspaceRoot,
+    ...(input.resumeSessionId ? ["--session", input.resumeSessionId] : []),
     ...imagePaths.flatMap((path) => ["--file", path]),
     prompt,
   ];

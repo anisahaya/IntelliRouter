@@ -26,6 +26,7 @@ export interface ClaudeTaskInput {
   repoSignals: RepoSignals;
   workspaceRoot: string;
   permission: "read-only" | "workspace-write";
+  resumeSessionId?: string;
   timeoutMs?: number;
 }
 
@@ -95,7 +96,7 @@ export async function executeClaudeTask(
     "--print",
     "--output-format",
     "json",
-    "--no-session-persistence",
+    ...(input.resumeSessionId ? ["--resume", input.resumeSessionId] : []),
     "--safe-mode",
     "--model",
     input.model,
