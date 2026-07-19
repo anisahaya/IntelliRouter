@@ -1,5 +1,6 @@
 import type {
   AutoCandidate,
+  AutoObservedMetrics,
   AutoRankedCandidate,
   AutoRouteProfile,
   AutoTaskProfile,
@@ -23,11 +24,21 @@ export interface AutoScoreResult {
   excluded: Array<{ id: string; reasons: string[] }>;
 }
 
+export interface AutoObservationOptions {
+  minimumAttemptSamples?: number;
+  minimumFeedbackSamples?: number;
+  halfLifeMs?: number;
+  now?: number;
+  maximumAdjustment?: number;
+}
+
 export function scoreAutoCandidates(
   candidates: AutoCandidate[],
   task: AutoTaskProfile,
   profile: AutoRouteProfile,
   currentModel?: string,
+  observations: Readonly<Record<string, AutoObservedMetrics>> = {},
+  observationOptions: AutoObservationOptions = {},
 ): AutoScoreResult {
   const excluded: Array<{ id: string; reasons: string[] }> = [];
   const ranked: AutoRankedCandidate[] = [];
@@ -46,11 +57,13 @@ export function scoreAutoCandidates(
         (task.mechanical > 0.55 ? (candidate.speed + candidate.economy) * 0.1 : 0),
     );
     const configured = weights[profile];
+    const observed = observedAdjustment(observations[candidate.id], observationOptions);
     const total = clamp(
       taskFit * configured.fit +
         candidate.quality * configured.quality +
         candidate.speed * configured.speed +
-        candidate.economy * configured.economy,
+        candidate.economy * configured.economy +
+        observed.adjustment,
     );
     ranked.push({
       id: candidate.id,
@@ -67,6 +80,12 @@ export function scoreAutoCandidates(
         economy: candidate.economy,
         specialization,
         total,
+        ...(observations[candidate.id]
+          ? {
+              observedAdjustment: observed.adjustment,
+              observedSampleCount: observed.sampleCount,
+            }
+          : {}),
       },
     });
   }
@@ -76,6 +95,34 @@ export function scoreAutoCandidates(
   );
   excluded.sort((left, right) => left.id.localeCompare(right.id));
   return { ranked, excluded };
+}
+
+function observedAdjustment(
+  metrics: AutoObservedMetrics | undefined,
+  options: AutoObservationOptions,
+): { adjustment: number; sampleCount: number } {
+  if (!metrics) return { adjustment: 0, sampleCount: 0 };
+  const minimumAttempts = options.minimumAttemptSamples ?? 8;
+  const minimumFeedback = options.minimumFeedbackSamples ?? 3;
+  const sampleCount = metrics.attemptSamples + metrics.feedbackSamples;
+  if (metrics.attemptSamples < minimumAttempts && metrics.feedbackSamples < minimumFeedback)
+    return { adjustment: 0, sampleCount };
+
+  const halfLifeMs = options.halfLifeMs ?? 30 * 24 * 60 * 60 * 1_000;
+  const now = options.now ?? Date.now();
+  const ageMs = metrics.lastObservedAt
+    ? Math.max(0, now - Date.parse(metrics.lastObservedAt))
+    : halfLifeMs;
+  const decay = Number.isFinite(ageMs) ? 0.5 ** (ageMs / halfLifeMs) : 0;
+  const attemptConfidence = Math.min(1, metrics.attemptSamples / 24);
+  const feedbackConfidence = Math.min(1, metrics.feedbackSamples / 8);
+  const reliabilityPrior = (metrics.successRate - 0.5) * 0.1 * attemptConfidence;
+  const speedPrior =
+    (0.5 - Math.min(1, metrics.averageLatencyMs / 10_000)) * 0.04 * attemptConfidence;
+  const feedbackPrior = metrics.feedbackPrior * 0.06 * feedbackConfidence;
+  const cap = options.maximumAdjustment ?? 0.08;
+  const adjustment = Math.max(-cap, Math.min(cap, reliabilityPrior + speedPrior + feedbackPrior));
+  return { adjustment: Number((adjustment * decay).toFixed(6)), sampleCount };
 }
 
 export function clampEffort(

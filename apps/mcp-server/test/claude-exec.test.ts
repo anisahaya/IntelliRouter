@@ -41,7 +41,10 @@ beforeAll(async () => {
     `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args[0] === "auth") process.stdout.write(JSON.stringify({loggedIn:true,authMethod:"claude.ai"}));
-else process.stdout.write(JSON.stringify({result:"CLAUDE_NATIVE_PASS",session_id:"claude-child"}));
+else {
+  const result = args.includes("--resume") && args.includes("prior-claude") ? "CLAUDE_RESUME_PASS" : "CLAUDE_NATIVE_PASS";
+  process.stdout.write(JSON.stringify({result,session_id:"claude-child"}));
+}
 `,
     "utf8",
   );
@@ -116,6 +119,34 @@ describe("Claude Code native execution", () => {
       outcome: "failure",
       safeToFallback: true,
       stderr: expect.stringContaining("Unable to launch Claude Code child"),
+    });
+  });
+
+  it("continues a Claude trajectory with the help-confirmed resume flag", async () => {
+    const state = { path: join(root, "resume-routes.jsonl") };
+    const routeId = await plannedRoute(state);
+    const result = await executeHarnessTask(
+      {
+        routeId,
+        harness: "claude-code",
+        model: "sonnet",
+        reasoningEffort: "high",
+        objective: "Continue the prior trajectory",
+        resumeSessionId: "prior-claude",
+        repoSignals: signals,
+        workspaceRoot: workspace,
+        permission: "read-only",
+      },
+      {
+        claude: { executable, trustedRoot: workspace, availableModels: ["sonnet"] },
+        state,
+        env: { ...process.env, MODEL_ROUTER_WORKSPACE_ROOT: workspace },
+      },
+    );
+    expect(result).toMatchObject({
+      outcome: "success",
+      output: "CLAUDE_RESUME_PASS",
+      childSessionId: "claude-child",
     });
   });
 });

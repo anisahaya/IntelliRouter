@@ -97,7 +97,9 @@ export const routeHarnessTaskInput = {
   profile: autoRouteProfileSchema.default("balanced"),
   currentModel: z.string().min(1).max(256).optional(),
   sessionId: z.string().min(1).max(512).optional(),
+  taskId: z.string().min(1).max(256).optional(),
   forceReroute: z.boolean().default(false),
+  probe: z.boolean().default(false),
   requirements: autoRouteRequirementsSchema.default({
     tools: true,
     vision: false,
@@ -121,6 +123,8 @@ export const delegateHarnessTaskInput = {
   repoSignals: repoSignalsSchema,
   workspaceRoot: z.string().min(1).max(4_096),
   permission: z.enum(["read-only", "workspace-write"]).default("read-only"),
+  allowWriteFallback: z.boolean().default(false),
+  resumeSessionId: z.string().min(1).max(512).optional(),
   timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
 };
 

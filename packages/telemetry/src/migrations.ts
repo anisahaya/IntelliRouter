@@ -110,6 +110,10 @@ const migrations = [
   `
     ALTER TABLE model_health_windows ADD COLUMN window_start_attempt_id INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+    ALTER TABLE route_candidates ADD COLUMN rank_index INTEGER;
+    CREATE INDEX IF NOT EXISTS idx_route_candidates_rank ON route_candidates(route_id, rank_index);
+  `,
 ];
 
 export function migrate(database: Database.Database): void {

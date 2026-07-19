@@ -1,5 +1,6 @@
 import type {
   AutoCandidate,
+  AutoObservedMetrics,
   AutoRouteDecision,
   AutoRouteProfile,
   AutoRouteRequirements,
@@ -10,12 +11,18 @@ import { buildAutoTaskProfile, scoreAutoCandidates } from "@model-router/router-
 import { type ClaudeDiscoveryOptions, discoverClaudeModels } from "./claude-cli.js";
 import { type CodexDiscoveryOptions, discoverCodexModels } from "./codex-cli.js";
 import { assertRootInvocation, sanitizeText } from "./context-security.js";
+import {
+  collectNativeProbeEvidence,
+  type NativeProbeEvidence,
+  type NativeProbeOptions,
+} from "./native-probes.js";
 import { discoverOpenCodeModels, type OpenCodeDiscoveryOptions } from "./opencode-cli.js";
 import { collectRepoSignals, type RepoSignalOptions } from "./repo-signals.js";
 import {
   affinityDecision,
   findAffinity,
   newRouteId,
+  observedMetrics,
   persistDecision,
   type RouteStateOptions,
   routeIdentity,
@@ -31,7 +38,9 @@ export interface HarnessRouteInput {
   profile?: AutoRouteProfile;
   currentModel?: string;
   sessionId?: string;
+  taskId?: string;
   forceReroute?: boolean;
+  probe?: boolean;
   requirements: AutoRouteRequirements;
 }
 
@@ -41,6 +50,7 @@ export interface HarnessRouterOptions {
   claude?: ClaudeDiscoveryOptions;
   repo?: RepoSignalOptions;
   state?: RouteStateOptions;
+  probes?: NativeProbeOptions;
   env?: NodeJS.ProcessEnv;
   trustedRoot?: string;
 }
@@ -64,16 +74,71 @@ export async function routeHarnessTask(
     repoSignals,
     requirements: input.requirements,
   });
-  const candidates = [...harnessCandidates, ...(input.registeredAgents ?? []).map(agentCandidate)];
+  let candidates = [...harnessCandidates, ...(input.registeredAgents ?? []).map(agentCandidate)];
   const fallbackModel = resolveCurrentModel(input.currentModel, harnessCandidates);
   if (input.harness === "codex" && !fallbackModel) {
     throw new Error("current model does not match the live Codex catalog");
   }
   const profile = input.profile ?? "balanced";
-  const { ranked, excluded } = scoreAutoCandidates(candidates, taskProfile, profile, fallbackModel);
+  const stateOptions = { ...options.state, env };
+  const observations = await observedMetrics(
+    input.harness,
+    candidates.map((candidate) => candidate.id),
+    stateOptions,
+  );
+  const preliminary = scoreAutoCandidates(
+    candidates,
+    taskProfile,
+    profile,
+    fallbackModel,
+    observations,
+  );
+  const catalogObservedAt = new Date().toISOString();
+  const probeOptions = {
+    ...options.probes,
+    enabled: input.probe === true && options.probes?.enabled !== false,
+    path: options.probes?.path ?? probeStatePath(options.state, env),
+  };
+  const probeEvidence = await collectNativeProbeEvidence(
+    input.harness,
+    candidates.filter(
+      (candidate) =>
+        candidate.kind !== "user-agent" &&
+        preliminary.ranked.slice(0, 2).some((ranked) => ranked.id === candidate.id),
+    ),
+    catalogObservedAt,
+    env,
+    probeOptions,
+  );
+  candidates = candidates.map((candidate) =>
+    probeEvidence[candidate.id]?.outcome && probeEvidence[candidate.id]?.outcome !== "success"
+      ? { ...candidate, available: false }
+      : candidate,
+  );
+  const scored = scoreAutoCandidates(candidates, taskProfile, profile, fallbackModel, observations);
+  const ranked = scored.ranked;
+  const excluded = scored.excluded.map((candidate) => {
+    const failure = probeEvidence[candidate.id]?.outcome;
+    return failure && failure !== "success"
+      ? { ...candidate, reasons: [...candidate.reasons, `native probe: ${failure}`] }
+      : candidate;
+  });
+  const confidenceRanked = ranked[0]
+    ? [
+        ranked[0],
+        ...scoreAutoCandidates(
+          candidates,
+          taskProfile,
+          profile,
+          undefined,
+          observations,
+        ).ranked.filter((candidate) => candidate.id !== ranked[0]?.id),
+      ]
+    : ranked;
   const identity = routeIdentity({
     harness: input.harness,
     sessionId: input.sessionId,
+    taskId: input.taskId,
     objective: objective.text,
     workspaceRoot,
     requirements: input.requirements,
@@ -99,6 +164,7 @@ export async function routeHarnessTask(
         execution,
       });
       if (reused) {
+        reused.confidence = affinityConfidence(reused.ranked);
         reused.sessionId = input.sessionId;
         await persistDecision(reused, identity, { ...options.state, env });
         return reused;
@@ -106,22 +172,31 @@ export async function routeHarnessTask(
     }
   }
   const winner = ranked[0];
+  const confidence = routeConfidence(
+    confidenceRanked,
+    observations,
+    probeEvidence,
+    catalogObservedAt,
+    Boolean(fallbackModel),
+  );
   const decision: AutoRouteDecision = {
     routeId: newRouteId(),
     harness: input.harness,
     sessionId: input.sessionId,
     taskFingerprint: identity.taskFingerprint,
     affinityReused: false,
+    confidence,
     status: "planned",
-    selected: winner
-      ? {
-          id: winner.id,
-          kind: winner.kind,
-          displayName: winner.displayName,
-          reasoningEffort: winner.reasoningEffort,
-          execution: winner.kind === "user-agent" ? "native-agent" : execution,
-        }
-      : null,
+    selected:
+      winner && !confidence.abstained
+        ? {
+            id: winner.id,
+            kind: winner.kind,
+            displayName: winner.displayName,
+            reasoningEffort: winner.reasoningEffort,
+            execution: winner.kind === "user-agent" ? "native-agent" : execution,
+          }
+        : null,
     profile,
     taskProfile,
     repoSignals,
@@ -135,6 +210,81 @@ export async function routeHarnessTask(
   };
   await persistDecision(decision, identity, { ...options.state, env });
   return decision;
+}
+
+function routeConfidence(
+  ranked: AutoRouteDecision["ranked"],
+  observations: Readonly<Record<string, AutoObservedMetrics>>,
+  probes: Readonly<Record<string, NativeProbeEvidence>>,
+  catalogObservedAt: string,
+  canAbstain: boolean,
+): NonNullable<AutoRouteDecision["confidence"]> {
+  const winner = ranked[0];
+  const margin = winner
+    ? Math.max(0, winner.scores.total - (ranked[1]?.scores.total ?? winner.scores.total - 0.2))
+    : 0;
+  const observed = winner ? observations[winner.id] : undefined;
+  const probe = winner ? probes[winner.id] : undefined;
+  const sampleSize = observed ? observed.attemptSamples + observed.feedbackSamples : 0;
+  const evidenceSources: NonNullable<AutoRouteDecision["confidence"]>["evidenceSources"] = [
+    "catalog",
+  ];
+  let score = 0.15 + Math.min(0.3, margin * 2.5);
+  const reasons = [`winner margin ${margin.toFixed(3)}`, "fresh native catalog"];
+  let freshestEvidenceAt = catalogObservedAt;
+  if (sampleSize > 0) {
+    evidenceSources.push("observations");
+    score += Math.min(0.25, sampleSize / 48);
+    reasons.push(`${sampleSize} observed outcome sample${sampleSize === 1 ? "" : "s"}`);
+    if (observed?.lastObservedAt && observed.lastObservedAt > freshestEvidenceAt)
+      freshestEvidenceAt = observed.lastObservedAt;
+  }
+  if (probe?.outcome === "success") {
+    evidenceSources.push("probe");
+    score += 0.4;
+    freshestEvidenceAt = probe.probedAt;
+    reasons.push(`native probe succeeded in ${probe.latencyMs}ms`);
+  }
+  score = Math.min(1, Number(score.toFixed(6)));
+  const abstained = canAbstain && (!winner || score < 0.3);
+  if (abstained) reasons.push("evidence below 0.30 abstention threshold; using current host");
+  return {
+    score,
+    level: score >= 0.55 ? "high" : score >= 0.3 ? "medium" : "low",
+    winnerMargin: Number(margin.toFixed(6)),
+    evidenceSources,
+    freshestEvidenceAt,
+    sampleSize,
+    abstained,
+    reasons,
+  };
+}
+
+function affinityConfidence(
+  ranked: AutoRouteDecision["ranked"],
+): NonNullable<AutoRouteDecision["confidence"]> {
+  const margin = Math.max(
+    0,
+    (ranked[0]?.scores.total ?? 0) - (ranked[1]?.scores.total ?? ranked[0]?.scores.total ?? 0),
+  );
+  return {
+    score: 1,
+    level: "high",
+    winnerMargin: margin,
+    evidenceSources: ["affinity"],
+    sampleSize: 1,
+    abstained: false,
+    reasons: ["compatible unexpired task affinity"],
+  };
+}
+
+function probeStatePath(
+  state: RouteStateOptions | undefined,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  if (state?.path) return `${state.path}.probes`;
+  if (env.MODEL_ROUTER_STATE_PATH) return `${env.MODEL_ROUTER_STATE_PATH}.probes`;
+  return env.HOME ? `${env.HOME}/.model-router/native-probes.jsonl` : undefined;
 }
 
 async function discoverHarnessCandidates(

@@ -1,7 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { FeedbackEvent, RouteDecision, RouteStats } from "@model-router/contracts";
+import type {
+  AutoObservedMetrics,
+  FeedbackEvent,
+  RouteDecision,
+  RouteStats,
+} from "@model-router/contracts";
 import type { ObservedModelMetrics, RouterState } from "@model-router/router-core";
 import Database from "better-sqlite3";
 import { migrate } from "./migrations.js";
@@ -240,6 +245,48 @@ export class TelemetryStore implements RouterState {
     };
   }
 
+  autoMetricsFor(modelId: string, taskType: string): AutoObservedMetrics {
+    const attempts = this.database
+      .prepare(`SELECT COUNT(*) samples,
+        COALESCE(AVG(CASE WHEN a.outcome='success' THEN 1.0 ELSE 0.0 END), 0) success_rate,
+        COALESCE(AVG(a.latency_ms), 500) average_latency_ms,
+        MAX(a.created_at) last_observed_at
+        FROM provider_attempts a JOIN route_decisions r ON r.id=a.route_id
+        WHERE a.model_id=? AND r.task_type=? AND a.outcome IN ('success','failure')`)
+      .get(modelId, taskType) as {
+      samples: number;
+      success_rate: number;
+      average_latency_ms: number;
+      last_observed_at: string | null;
+    };
+    const feedback = this.database
+      .prepare(`SELECT COUNT(*) samples,
+        COALESCE(AVG(CASE WHEN f.score IS NOT NULL THEN 2 * f.score - 1
+          ELSE CASE f.outcome WHEN 'success' THEN 1 WHEN 'failure' THEN -1
+          WHEN 'corrected' THEN -0.5 ELSE -0.25 END END), 0) prior,
+        MAX(f.created_at) last_observed_at
+        FROM feedback_events f JOIN route_decisions r ON r.id=f.route_id
+        WHERE f.id IN (SELECT MAX(id) FROM feedback_events GROUP BY route_id)
+          AND r.logical_model=? AND r.task_type=?`)
+      .get(modelId, taskType) as {
+      samples: number;
+      prior: number;
+      last_observed_at: string | null;
+    };
+    const latest = [attempts.last_observed_at, feedback.last_observed_at]
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1);
+    return {
+      successRate: Number(attempts.success_rate),
+      averageLatencyMs: Number(attempts.average_latency_ms),
+      feedbackPrior: Number(feedback.prior),
+      attemptSamples: Number(attempts.samples),
+      feedbackSamples: Number(feedback.samples),
+      lastObservedAt: latest,
+    };
+  }
+
   saveDecision(decision: RouteDecision): void {
     this.database.transaction(() => {
       this.database
@@ -261,14 +308,16 @@ export class TelemetryStore implements RouterState {
           decision.kind ?? "compatibility",
         );
       const insert = this.database.prepare(`INSERT INTO route_candidates
-        (route_id, model_id, eligible, exclusions_json, scores_json) VALUES (?, ?, ?, ?, ?)`);
-      for (const candidate of decision.candidates) {
+        (route_id, model_id, eligible, exclusions_json, scores_json, rank_index)
+        VALUES (?, ?, ?, ?, ?, ?)`);
+      for (const [rankIndex, candidate] of decision.candidates.entries()) {
         insert.run(
           decision.id,
           candidate.modelId,
           candidate.eligible ? 1 : 0,
           JSON.stringify(candidate.exclusionReasons),
           JSON.stringify(candidate.scores),
+          rankIndex,
         );
       }
     })();
@@ -280,7 +329,7 @@ export class TelemetryStore implements RouterState {
       | undefined;
     if (!row) return undefined;
     const candidateRows = this.database
-      .prepare("SELECT * FROM route_candidates WHERE route_id = ? ORDER BY model_id")
+      .prepare("SELECT * FROM route_candidates WHERE route_id = ? ORDER BY rank_index, model_id")
       .all(id) as Record<string, unknown>[];
     return {
       id: String(row.id),

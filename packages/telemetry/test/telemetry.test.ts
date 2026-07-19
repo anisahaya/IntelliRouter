@@ -56,6 +56,44 @@ describe("telemetry", () => {
     store.close();
   });
 
+  it("preserves candidate rank and exposes privacy-safe observed sample aggregates", () => {
+    const store = new TelemetryStore(":memory:");
+    store.saveDecision({
+      ...decision,
+      candidates: [
+        { ...decision.candidates[0]!, modelId: "z-first" },
+        { ...decision.candidates[0]!, modelId: "a-second" },
+      ],
+    });
+    store.recordAttempt({
+      routeId: "r1",
+      modelId: "z-first",
+      attemptOrder: 1,
+      outcome: "success",
+      status: 200,
+      latencyMs: 20,
+    });
+    store.recordFeedback({ routeId: "r1", outcome: "success", tags: ["useful"] });
+    expect(store.getDecision("r1")?.candidates.map((item) => item.modelId)).toEqual([
+      "z-first",
+      "a-second",
+    ]);
+    expect(store.autoMetricsFor("z-first", "code")).toMatchObject({
+      successRate: 1,
+      averageLatencyMs: 20,
+      attemptSamples: 1,
+      feedbackSamples: 0,
+    });
+    expect(store.autoMetricsFor("cheap", "code")).toMatchObject({
+      attemptSamples: 0,
+      feedbackSamples: 1,
+      feedbackPrior: 1,
+    });
+    const serialized = JSON.stringify(store.autoMetricsFor("cheap", "code"));
+    expect(serialized).not.toMatch(/prompt|objective|conversation|secret/i);
+    store.close();
+  });
+
   it("persists an installation salt and separates dry runs from request stats", () => {
     const store = new TelemetryStore(":memory:");
     expect(store.sessionSalt()).toBe(store.sessionSalt());
@@ -256,7 +294,7 @@ describe("telemetry", () => {
     const reopened = new TelemetryStore(path);
     expect(
       reopened.database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get(),
-    ).toBe(5);
+    ).toBe(6);
     expect(reopened.getDecision("served")?.logicalModel).toBe("cheap");
     reopened.close();
   });

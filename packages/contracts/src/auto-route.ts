@@ -93,6 +93,16 @@ export const autoCandidateSchema = z.object({
 });
 export type AutoCandidate = z.infer<typeof autoCandidateSchema>;
 
+export const autoObservedMetricsSchema = z.object({
+  successRate: z.number().min(0).max(1),
+  averageLatencyMs: z.number().nonnegative(),
+  feedbackPrior: z.number().min(-1).max(1),
+  attemptSamples: z.number().int().nonnegative(),
+  feedbackSamples: z.number().int().nonnegative(),
+  lastObservedAt: z.string().datetime().optional(),
+});
+export type AutoObservedMetrics = z.infer<typeof autoObservedMetricsSchema>;
+
 export const autoRankedCandidateSchema = z.object({
   id: z.string(),
   kind: z.enum(["codex-model", "harness-model", "user-agent"]),
@@ -105,6 +115,8 @@ export const autoRankedCandidateSchema = z.object({
     economy: z.number(),
     specialization: z.number(),
     total: z.number(),
+    observedAdjustment: z.number().optional(),
+    observedSampleCount: z.number().int().nonnegative().optional(),
   }),
 });
 export type AutoRankedCandidate = z.infer<typeof autoRankedCandidateSchema>;
@@ -115,6 +127,18 @@ export const autoRouteDecisionSchema = z.object({
   sessionId: z.string().optional(),
   taskFingerprint: z.string().optional(),
   affinityReused: z.boolean().default(false),
+  confidence: z
+    .object({
+      score: z.number().min(0).max(1),
+      level: z.enum(["low", "medium", "high"]),
+      winnerMargin: z.number().nonnegative(),
+      evidenceSources: z.array(z.enum(["catalog", "probe", "observations", "affinity"])),
+      freshestEvidenceAt: z.string().datetime().optional(),
+      sampleSize: z.number().int().nonnegative(),
+      abstained: z.boolean(),
+      reasons: z.array(z.string()),
+    })
+    .optional(),
   status: routeOutcomeSchema.default("planned"),
   selected: z
     .object({
@@ -139,14 +163,63 @@ export const autoRouteDecisionSchema = z.object({
 });
 export type AutoRouteDecision = z.infer<typeof autoRouteDecisionSchema>;
 
+export const harnessAttemptRecordSchema = z.object({
+  candidateId: z.string().min(1),
+  attemptOrder: z.number().int().positive(),
+  outcome: z.enum(["success", "failure", "timed-out", "canceled"]),
+  latencyMs: z.number().nonnegative(),
+  errorClass: z
+    .enum([
+      "timeout",
+      "network",
+      "rate_limit",
+      "overloaded",
+      "upstream_5xx",
+      "auth",
+      "model_not_found",
+      "invalid_request",
+      "client",
+      "unknown",
+    ])
+    .optional(),
+  observedAt: z.string().datetime(),
+});
+export type HarnessAttemptRecord = z.infer<typeof harnessAttemptRecordSchema>;
+
+export const harnessFeedbackRecordSchema = z.object({
+  outcome: z.enum(["success", "failure", "corrected", "abandoned"]),
+  score: z.number().min(0).max(1).optional(),
+  tags: z
+    .array(z.enum(["correctness", "quality", "speed", "cost", "tool-use", "instruction-following"]))
+    .max(16)
+    .default([]),
+  observedAt: z.string().datetime(),
+});
+export type HarnessFeedbackRecord = z.infer<typeof harnessFeedbackRecordSchema>;
+
+export const harnessHealthWindowSchema = z.object({
+  candidateId: z.string().min(1),
+  state: z.enum(["unknown", "healthy", "degraded", "unhealthy", "recovering"]),
+  attempts: z.number().int().nonnegative(),
+  failures: z.number().int().nonnegative(),
+  averageLatencyMs: z.number().nonnegative(),
+  updatedAt: z.string().datetime(),
+  cooldownUntil: z.string().datetime().optional(),
+});
+export type HarnessHealthWindow = z.infer<typeof harnessHealthWindowSchema>;
+
 export const harnessRouteRecordSchema = z.object({
   routeId: z.string().uuid(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   harness: harnessIdSchema,
   sessionHash: z.string().optional(),
+  taskIdHash: z.string().optional(),
   taskFingerprint: z.string(),
   workspaceFingerprint: z.string(),
+  requirementsFingerprint: z.string().optional(),
+  affinityExpiresAt: z.string().datetime().optional(),
+  confidence: autoRouteDecisionSchema.shape.confidence,
   selectedCandidate: z.string().optional(),
   reasoningEffort: reasoningEffortSchema.optional(),
   fallbackModel: z.string().optional(),
@@ -160,6 +233,20 @@ export const harnessRouteRecordSchema = z.object({
     scope: z.string(),
     requiredCapabilities: z.array(z.string()),
   }),
+  candidateRankings: z
+    .array(
+      z.object({
+        candidateId: z.string().min(1),
+        rank: z.number().int().positive(),
+        totalScore: z.number(),
+        kind: z.enum(["codex-model", "harness-model", "user-agent"]).optional(),
+        reasoningEffort: reasoningEffortSchema.optional(),
+      }),
+    )
+    .optional(),
+  attempts: z.array(harnessAttemptRecordSchema).optional(),
+  feedback: z.array(harnessFeedbackRecordSchema).optional(),
+  healthWindows: z.array(harnessHealthWindowSchema).optional(),
   partialWriteDetected: z.boolean().default(false),
 });
 export type HarnessRouteRecord = z.infer<typeof harnessRouteRecordSchema>;
