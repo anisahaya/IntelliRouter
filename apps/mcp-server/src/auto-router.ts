@@ -1,13 +1,21 @@
+import { loadConfig } from "@model-router/config";
 import type {
   AutoCandidate,
   AutoRouteDecision,
-  AutoRouteProfile,
   AutoRouteRequirements,
+  NativeRouteOverride,
+  NativeRoutingConfig,
   RegisteredAgent,
 } from "@model-router/contracts";
-import { buildAutoTaskProfile, scoreAutoCandidates } from "@model-router/router-core";
+import { buildAutoTaskProfile } from "@model-router/router-core";
 import { type CodexDiscoveryOptions, discoverCodexModels } from "./codex-cli.js";
 import { assertRootInvocation, sanitizeText } from "./context-security.js";
+import {
+  applyNativeMetadata,
+  resolveNativeCandidateId,
+  resolveNativePolicy,
+  scoreWithNativePolicy,
+} from "./native-policy.js";
 import { collectRepoSignals, type RepoSignalOptions } from "./repo-signals.js";
 import { resolveTrustedWorkspace } from "./workspace-security.js";
 
@@ -16,7 +24,8 @@ export interface AutoRouteInput {
   conversationSummary?: string;
   workspaceRoot: string;
   registeredAgents?: RegisteredAgent[];
-  profile?: AutoRouteProfile;
+  profile?: string;
+  override?: NativeRouteOverride;
   currentModel: string;
   requirements: AutoRouteRequirements;
 }
@@ -26,6 +35,8 @@ export interface AutoRouterOptions {
   repo?: RepoSignalOptions;
   env?: NodeJS.ProcessEnv;
   trustedRoot?: string;
+  policyConfig?: NativeRoutingConfig;
+  policyConfigPath?: string;
 }
 
 export async function autoRoute(
@@ -47,16 +58,32 @@ export async function autoRoute(
     repoSignals,
     requirements,
   });
-  const agents = (input.registeredAgents ?? []).map(agentCandidate);
-  const profile = input.profile ?? "balanced";
-  const currentModel = resolveCurrentModel(input.currentModel, models);
-  if (!currentModel) throw new Error("current model does not match the live Codex catalog");
-  const { ranked, excluded } = scoreAutoCandidates(
-    [...models, ...agents],
-    taskProfile,
-    profile,
-    currentModel,
+  const policyConfig = await readPolicyConfig(options);
+  const resolvedPolicy = resolveNativePolicy({
+    config: policyConfig,
+    repository: repoSignals.rootName,
+    requestedProfile: input.profile,
+  });
+  const metadata = applyNativeMetadata(
+    [...models, ...(input.registeredAgents ?? []).map(agentCandidate)],
+    resolvedPolicy,
   );
+  const profile = resolvedPolicy.decision.profile;
+  const currentModel = resolveCurrentModel(
+    resolveNativeCandidateId(input.currentModel, resolvedPolicy.aliases),
+    metadata.candidates.filter((candidate) => candidate.kind === "codex-model"),
+  );
+  if (!currentModel) throw new Error("current model does not match the live Codex catalog");
+  const { ranked, excluded, policy } = scoreWithNativePolicy({
+    candidates: metadata.candidates,
+    task: taskProfile,
+    currentModel,
+    harness: "codex",
+    resolved: resolvedPolicy,
+    metadataApplied: metadata.applied,
+    metadataIgnored: metadata.ignored,
+    override: input.override,
+  });
   const winner = ranked[0];
   return {
     affinityReused: false,
@@ -71,6 +98,7 @@ export async function autoRoute(
         }
       : null,
     profile,
+    policy,
     taskProfile,
     repoSignals,
     ranked,
@@ -81,6 +109,20 @@ export async function autoRoute(
       conversationTruncated: conversation.truncated,
     },
   };
+}
+
+async function readPolicyConfig(
+  options: AutoRouterOptions,
+): Promise<NativeRoutingConfig | undefined> {
+  if (options.policyConfig) return options.policyConfig;
+  if (!options.policyConfigPath) return undefined;
+  try {
+    return (await loadConfig(options.policyConfigPath, { validateEnv: false, env: options.env }))
+      .nativeRouting;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 function resolveCurrentModel(

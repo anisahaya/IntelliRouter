@@ -1,3 +1,4 @@
+import { CONFIG_ENV, DEFAULT_CONFIG_PATH } from "@model-router/config";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod/v4";
@@ -13,9 +14,12 @@ import {
   delegateHarnessTaskInput,
   failure,
   genericObjectOutput,
+  resumeHarnessTaskInput,
+  routeAndStartHarnessTaskInput,
   routeHarnessTaskInput,
   routeTaskInput,
   routeTaskOutput,
+  startHarnessTaskInput,
   success,
 } from "./tools.js";
 
@@ -146,7 +150,7 @@ export function createMcpServer(
     "route_harness_task",
     {
       description:
-        "Discover signed-in Codex/OpenCode models or Claude Code aliases, combine bounded prompt/conversation/repository context, preserve task affinity, and return an inspectable native route.",
+        "Discover one or multiple signed-in Codex/OpenCode/Claude Code catalogs, combine bounded context, apply policy and health, and return an inspectable native route with normalized cross-harness execution coordinates.",
       inputSchema: routeHarnessTaskInput,
       outputSchema: genericObjectOutput,
     },
@@ -169,6 +173,116 @@ export function createMcpServer(
     async (input) => {
       try {
         return success(await handlers.delegateHarnessTask(input));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "route_and_start_harness_task",
+    {
+      description:
+        "Atomically persist a native route and idempotent durable job, then execute it asynchronously without storing raw task content or output.",
+      inputSchema: routeAndStartHarnessTaskInput,
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.routeAndStartHarnessTask(input));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "start_harness_task",
+    {
+      description:
+        "Create an idempotent durable asynchronous job for an existing persisted native route.",
+      inputSchema: startHarnessTaskInput,
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.startHarnessTask(input));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "get_harness_task",
+    {
+      description:
+        "Read privacy-safe durable job progress and, only while this server process retains it, the terminal result.",
+      inputSchema: { jobId: z.string().uuid() },
+      outputSchema: genericObjectOutput,
+    },
+    async ({ jobId }) => {
+      try {
+        return success(await handlers.getHarnessTask(jobId));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "cancel_harness_task",
+    {
+      description:
+        "Request cooperative cancellation of a durable job; queued jobs cancel immediately and running jobs finish cancellation after the adapter returns.",
+      inputSchema: { jobId: z.string().uuid() },
+      outputSchema: genericObjectOutput,
+    },
+    async ({ jobId }) => {
+      try {
+        return success(await handlers.cancelHarnessTask(jobId));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "resume_harness_task",
+    {
+      description:
+        "Resume a terminal or restart-orphaned job only when the resubmitted immutable execution envelope and optional child session token match their stored hashes.",
+      inputSchema: resumeHarnessTaskInput,
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.resumeHarnessTask(input));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "list_harness_tasks",
+    {
+      description: "List bounded privacy-safe durable harness jobs by route or lifecycle status.",
+      inputSchema: {
+        routeId: z.string().uuid().optional(),
+        status: z
+          .enum([
+            "queued",
+            "starting",
+            "running",
+            "succeeded",
+            "failed",
+            "timed-out",
+            "canceled",
+            "orphaned",
+          ])
+          .optional(),
+        limit: z.number().int().positive().max(1_000).default(50),
+      },
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.listHarnessTasks(input));
       } catch (error) {
         return failure(error);
       }
@@ -245,7 +359,11 @@ export function createMcpServer(
 }
 
 export async function main(): Promise<void> {
-  await createMcpServer().connect(new StdioServerTransport());
+  const policyConfigPath = process.env[CONFIG_ENV] ?? DEFAULT_CONFIG_PATH;
+  await createMcpServer(undefined, {
+    autoRouter: { policyConfigPath },
+    harnessRouter: { policyConfigPath },
+  }).connect(new StdioServerTransport());
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {

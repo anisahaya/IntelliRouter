@@ -9,6 +9,31 @@ privacy:
   storeResponses: false
   hashSessionIds: true
 
+nativeRouting:
+  defaultProfile: balanced
+  repositoryProfiles:
+    model-router: repo-safe
+  profiles:
+    repo-safe:
+      extends: quality
+      policy:
+        harnesses:
+          allow: [codex, opencode, claude-code]
+        candidates:
+          deny: [retired-model]
+          prefer: { preferred-model: 0.08 }
+          penalize: { high-latency-model: 0.04 }
+        effort:
+          cap: high
+        aliases:
+          preferred: preferred-model
+        overrides:
+          preferred-model:
+            quality: 0.95
+        budget:
+          windowHours: 24
+          maxRoutes: 200
+
 models:
   - id: fast-openai
     provider: openai-compatible

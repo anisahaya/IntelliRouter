@@ -1,10 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { extname, join } from "node:path";
 import type {
   AutoObservedMetrics,
   AutoRouteDecision,
-  AutoRouteProfile,
   AutoRouteRequirements,
   AutoTaskProfile,
   HarnessAttemptRecord,
@@ -12,12 +11,18 @@ import type {
   HarnessHealthWindow,
   HarnessId,
   HarnessRouteRecord,
+  NativeRouteHistoryFilters,
+  NativeRouteJob,
+  NativeRouteStats,
   ReasoningEffort,
   RouteOutcome,
 } from "@model-router/contracts";
+import { TelemetryStore } from "@model-router/telemetry";
+import type { NativePolicyUsage } from "./native-policy.js";
 
 export interface RouteStateOptions {
   path?: string;
+  databasePath?: string;
   env?: NodeJS.ProcessEnv;
   affinityTtlMs?: number;
   now?: () => number;
@@ -60,6 +65,16 @@ export async function persistDecision(
   identity: ReturnType<typeof routeIdentity>,
   options: RouteStateOptions = {},
 ): Promise<HarnessRouteRecord> {
+  const record = buildRouteRecord(decision, identity, options);
+  await appendRecord(record, options);
+  return record;
+}
+
+export function buildRouteRecord(
+  decision: AutoRouteDecision,
+  identity: ReturnType<typeof routeIdentity>,
+  options: RouteStateOptions = {},
+): HarnessRouteRecord {
   if (!decision.harness) throw new Error("Cannot persist a route without a harness");
   const now = new Date().toISOString();
   const record: HarnessRouteRecord = {
@@ -80,6 +95,7 @@ export async function persistDecision(
     reasoningEffort: decision.selected?.reasoningEffort,
     fallbackModel: decision.fallback.model,
     profile: decision.profile,
+    policy: decision.policy,
     outcome: "planned",
     featureSummary: featureSummary(decision.taskProfile),
     candidateRankings: decision.ranked.map((candidate, index) => ({
@@ -94,8 +110,22 @@ export async function persistDecision(
     healthWindows: [],
     partialWriteDetected: false,
   };
-  await appendRecord(record, options);
   return record;
+}
+
+export async function persistDecisionAndJob(
+  decision: AutoRouteDecision,
+  identity: ReturnType<typeof routeIdentity>,
+  job: NativeRouteJob,
+  options: RouteStateOptions = {},
+): Promise<{ route: HarnessRouteRecord; job: NativeRouteJob }> {
+  const route = buildRouteRecord(decision, identity, options);
+  const store = await openNativeStore(options);
+  try {
+    return { route, job: store.saveNativeRouteAndJob(route, job) };
+  } finally {
+    store.close();
+  }
 }
 
 export async function recordRouteAttempt(
@@ -245,6 +275,28 @@ export async function observedMetrics(
   );
 }
 
+export async function nativePolicyUsage(
+  input: { harness: HarnessId; profile: string; since: string },
+  options: RouteStateOptions = {},
+): Promise<NativePolicyUsage> {
+  const records = (await readRecords(options)).filter(
+    (record) =>
+      record.harness === input.harness &&
+      record.profile === input.profile &&
+      record.createdAt >= input.since,
+  );
+  const candidateRoutes: Record<string, number> = {};
+  let attempts = 0;
+  for (const record of records) {
+    attempts += record.attempts?.length ?? 0;
+    if (record.selectedCandidate) {
+      candidateRoutes[record.selectedCandidate] =
+        (candidateRoutes[record.selectedCandidate] ?? 0) + 1;
+    }
+  }
+  return { routes: records.length, attempts, candidateRoutes };
+}
+
 export async function updateRouteOutcome(
   routeId: string,
   outcome: RouteOutcome,
@@ -268,7 +320,12 @@ export async function getRouteRecord(
   routeId: string,
   options: RouteStateOptions = {},
 ): Promise<HarnessRouteRecord | undefined> {
-  return (await readRecords(options)).filter((record) => record.routeId === routeId).at(-1);
+  const store = await openNativeStore(options);
+  try {
+    return store.getNativeRoute(routeId);
+  } finally {
+    store.close();
+  }
 }
 
 export function newRouteId(): string {
@@ -280,7 +337,8 @@ export function affinityDecision(input: {
   candidates: AutoRouteDecision["ranked"];
   taskProfile: AutoTaskProfile;
   repoSignals: AutoRouteDecision["repoSignals"];
-  profile: AutoRouteProfile;
+  profile: string;
+  policy?: AutoRouteDecision["policy"];
   context: AutoRouteDecision["context"];
   fallbackModel?: string;
   execution: "codex-exec" | "opencode-run" | "claude-print";
@@ -305,6 +363,7 @@ export function affinityDecision(input: {
       execution: input.execution,
     },
     profile: input.profile,
+    policy: input.policy,
     taskProfile: input.taskProfile,
     repoSignals: input.repoSignals,
     ranked: [selected, ...input.candidates.filter((candidate) => candidate.id !== selected.id)],
@@ -334,12 +393,72 @@ function featureSummary(task: AutoTaskProfile): HarnessRouteRecord["featureSumma
 }
 
 async function appendRecord(record: HarnessRouteRecord, options: RouteStateOptions): Promise<void> {
-  const path = statePath(options);
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await appendFile(path, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
+  const store = await openNativeStore(options);
+  try {
+    store.saveNativeRoute(record);
+  } finally {
+    store.close();
+  }
 }
 
 async function readRecords(options: RouteStateOptions): Promise<HarnessRouteRecord[]> {
+  const store = await openNativeStore(options);
+  try {
+    return store.getAllNativeRoutes();
+  } finally {
+    store.close();
+  }
+}
+
+export async function getNativeRouteHistory(
+  filters: NativeRouteHistoryFilters = {},
+  options: RouteStateOptions = {},
+): Promise<HarnessRouteRecord[]> {
+  const store = await openNativeStore(options);
+  try {
+    return store.getNativeRouteHistory(filters);
+  } finally {
+    store.close();
+  }
+}
+
+export async function getNativeRouteStats(
+  filters: Omit<NativeRouteHistoryFilters, "limit"> = {},
+  options: RouteStateOptions = {},
+): Promise<NativeRouteStats> {
+  const store = await openNativeStore(options);
+  try {
+    return store.getNativeRouteStats(filters);
+  } finally {
+    store.close();
+  }
+}
+
+export async function pruneNativeRoutes(
+  input: { before: string; now?: number },
+  options: RouteStateOptions = {},
+): Promise<number> {
+  const store = await openNativeStore(options);
+  try {
+    return store.pruneNativeRoutes(input);
+  } finally {
+    store.close();
+  }
+}
+
+export async function openNativeStore(options: RouteStateOptions): Promise<TelemetryStore> {
+  const store = new TelemetryStore(databasePath(options), { now: options.now });
+  try {
+    const legacy = await readLegacyRecords(options);
+    if (legacy.length) store.importNativeRoutes(legacy, digest(statePath(options)));
+    return store;
+  } catch (error) {
+    store.close();
+    throw error;
+  }
+}
+
+async function readLegacyRecords(options: RouteStateOptions): Promise<unknown[]> {
   try {
     const source = await readFile(statePath(options), "utf8");
     return source
@@ -347,7 +466,7 @@ async function readRecords(options: RouteStateOptions): Promise<HarnessRouteReco
       .filter(Boolean)
       .flatMap((line) => {
         try {
-          return [JSON.parse(line) as HarnessRouteRecord];
+          return [JSON.parse(line) as unknown];
         } catch {
           return [];
         }
@@ -356,6 +475,26 @@ async function readRecords(options: RouteStateOptions): Promise<HarnessRouteReco
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
+}
+
+function databasePath(options: RouteStateOptions): string {
+  if (options.databasePath) return options.databasePath;
+  const env = options.env ?? process.env;
+  if (env.MODEL_ROUTER_NATIVE_DATABASE_PATH) return env.MODEL_ROUTER_NATIVE_DATABASE_PATH;
+  if (options.path) {
+    const extension = extname(options.path);
+    return extension
+      ? `${options.path.slice(0, -extension.length)}.sqlite`
+      : `${options.path}.sqlite`;
+  }
+  if (env.MODEL_ROUTER_STATE_PATH) return `${env.MODEL_ROUTER_STATE_PATH}.sqlite`;
+  const home = env.HOME;
+  if (!home) {
+    throw new Error(
+      "HOME, MODEL_ROUTER_NATIVE_DATABASE_PATH, or an explicit databasePath is required",
+    );
+  }
+  return join(home, ".model-router", "router.db");
 }
 
 function statePath(options: RouteStateOptions): string {

@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RouteDecision } from "@model-router/contracts";
+import type { HarnessRouteRecord, RouteDecision } from "@model-router/contracts";
 import { redactValue, TelemetryStore } from "@model-router/telemetry";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
@@ -31,6 +31,45 @@ const decision: RouteDecision = {
   affinityUsed: false,
   createdAt: new Date().toISOString(),
 };
+
+function nativeRecord(
+  routeId: string,
+  outcome: HarnessRouteRecord["outcome"],
+  affinityExpiresAt?: string,
+): HarnessRouteRecord {
+  return {
+    routeId,
+    createdAt: "2025-01-01T00:00:00.000Z",
+    updatedAt: "2025-01-01T00:00:00.000Z",
+    harness: "opencode",
+    taskFingerprint: "task-hash",
+    workspaceFingerprint: "workspace-hash",
+    affinityExpiresAt,
+    confidence: {
+      score: 0.7,
+      level: "medium",
+      winnerMargin: 0.2,
+      evidenceSources: ["catalog"],
+      sampleSize: 1,
+      abstained: false,
+      reasons: [],
+    },
+    selectedCandidate: "candidate-a",
+    profile: "balanced",
+    outcome,
+    featureSummary: {
+      taskType: "implementation",
+      complexity: 0.5,
+      risk: 0.2,
+      scope: "single",
+      requiredCapabilities: ["tools"],
+    },
+    attempts: [],
+    feedback: [],
+    healthWindows: [],
+    partialWriteDetected: false,
+  };
+}
 
 describe("telemetry", () => {
   it("redacts nested secrets and URL query secrets case-insensitively", () => {
@@ -227,6 +266,27 @@ describe("telemetry", () => {
     store.close();
   });
 
+  it("retains queued native jobs and live affinity while pruning terminal history", () => {
+    const now = Date.parse("2026-01-01T00:00:00.000Z");
+    const store = new TelemetryStore(":memory:", { now: () => now });
+    const expired = "11111111-1111-4111-8111-111111111111";
+    const queued = "22222222-2222-4222-8222-222222222222";
+    const affinity = "33333333-3333-4333-8333-333333333333";
+    store.saveNativeRoute(nativeRecord(expired, "failure"));
+    store.saveNativeRoute(nativeRecord(queued, "success"));
+    store.saveNativeRoute(nativeRecord(affinity, "success", "2026-01-01T00:01:00.000Z"));
+    store.database
+      .prepare(
+        "INSERT INTO native_route_jobs(job_id, route_id, status, updated_at) VALUES (?, ?, ?, ?)",
+      )
+      .run("job-1", queued, "queued", "2025-01-01T00:00:00.000Z");
+    expect(store.pruneNativeRoutes({ before: "2025-02-01T00:00:00.000Z", now })).toBe(1);
+    expect(store.getNativeRoute(expired)).toBeUndefined();
+    expect(store.getNativeRoute(queued)).toBeDefined();
+    expect(store.getNativeRoute(affinity)).toBeDefined();
+    store.close();
+  });
+
   it("migrates a populated v1 database additively and idempotently", async () => {
     const directory = await mkdtemp(join(tmpdir(), "router-v1-"));
     const path = join(directory, "router.db");
@@ -294,7 +354,7 @@ describe("telemetry", () => {
     const reopened = new TelemetryStore(path);
     expect(
       reopened.database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get(),
-    ).toBe(6);
+    ).toBe(8);
     expect(reopened.getDecision("served")?.logicalModel).toBe("cheap");
     reopened.close();
   });

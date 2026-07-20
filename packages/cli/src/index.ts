@@ -6,6 +6,7 @@ import { doctor } from "./doctor.js";
 import { explainRoute } from "./explain.js";
 import { submitFeedback } from "./feedback.js";
 import { nativeDoctor } from "./native-doctor.js";
+import { nativeHistory, nativeStats } from "./native-state.js";
 import { routeTask } from "./route.js";
 import { serve } from "./serve.js";
 import { setupHarness } from "./setup.js";
@@ -52,28 +53,38 @@ program
   .option("--workspace <path>", "trusted workspace", process.cwd())
   .option("--current-model <model>")
   .option("--session <id>")
-  .option("--profile <profile>", "balanced, quality, economy, or speed", "balanced")
+  .option("--profile <profile>", "built-in or configured native profile")
+  .option("--candidate <candidate>", "explicit candidate ID or configured alias")
+  .option("--effort <effort>", "explicit low, medium, high, xhigh, max, or ultra effort")
+  .option("--config <path>", "router config containing nativeRouting policies")
   .option("--edit")
   .option("--vision")
   .option("--search")
   .option("--minimum-context <tokens>", "minimum context tokens", Number, 0)
   .action(async (options) =>
     print(
-      await routeHarnessTask({
-        harness: options.harness,
-        objective: options.objective,
-        workspaceRoot: options.workspace,
-        currentModel: options.currentModel,
-        sessionId: options.session,
-        profile: options.profile,
-        requirements: {
-          tools: true,
-          edit: Boolean(options.edit),
-          vision: Boolean(options.vision),
-          search: Boolean(options.search),
-          minimumContextTokens: options.minimumContext,
+      await routeHarnessTask(
+        {
+          harness: options.harness,
+          objective: options.objective,
+          workspaceRoot: options.workspace,
+          currentModel: options.currentModel,
+          sessionId: options.session,
+          profile: options.profile,
+          override:
+            options.candidate || options.effort
+              ? { candidate: options.candidate, reasoningEffort: options.effort }
+              : undefined,
+          requirements: {
+            tools: true,
+            edit: Boolean(options.edit),
+            vision: Boolean(options.vision),
+            search: Boolean(options.search),
+            minimumContextTokens: options.minimumContext,
+          },
         },
-      }),
+        { policyConfigPath: options.config },
+      ),
     ),
   );
 program
@@ -84,6 +95,21 @@ program
     if (!route) throw new Error(`Unknown harness route: ${routeId}`);
     print(route);
   });
+program
+  .command("native-history")
+  .description("Read privacy-safe native route history from the local SQLite store")
+  .option("--since <time>", "ISO timestamp")
+  .option("--harness <harness>", "codex, opencode, claude-code, or pi")
+  .option("--outcome <outcome>")
+  .option("--limit <count>", "maximum routes", Number, 50)
+  .action(async (options) => print(await nativeHistory(options)));
+program
+  .command("native-stats")
+  .description("Read aggregate privacy-safe native routing statistics")
+  .option("--since <time>", "ISO timestamp")
+  .option("--harness <harness>", "codex, opencode, claude-code, or pi")
+  .option("--outcome <outcome>")
+  .action(async (options) => print(await nativeStats(options)));
 program
   .command("route")
   .requiredOption("--task <task>")

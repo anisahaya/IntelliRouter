@@ -6,6 +6,7 @@ import type {
 } from "@model-router/contracts";
 import { type ClaudeExecOptions, executeClaudeTask } from "./claude-exec.js";
 import { type CodexExecOptions, executeCodexTask } from "./codex-exec.js";
+import { decodeNormalizedCandidateId } from "./harness-candidate.js";
 import { executeOpenCodeTask, type OpenCodeExecOptions } from "./opencode-exec.js";
 import { collectRepoSignals, type RepoSignalOptions } from "./repo-signals.js";
 import {
@@ -38,6 +39,8 @@ export interface HarnessTaskInput {
 
 export interface HarnessExecutionAttempt {
   candidateId: string;
+  executionHarness?: HarnessId;
+  executionModel?: string;
   reasoningEffort: ReasoningEffort;
   attemptOrder: number;
   outcome: "success" | "failure" | "timed-out";
@@ -52,6 +55,8 @@ export interface HarnessTaskResult {
   routeId: string;
   harness: HarnessId;
   model: string;
+  executionHarness?: HarnessId;
+  executionModel?: string;
   reasoningEffort: ReasoningEffort;
   output: string;
   stderr: string;
@@ -73,6 +78,15 @@ export interface HarnessExecOptions {
   repo?: RepoSignalOptions;
   state?: RouteStateOptions;
   env?: NodeJS.ProcessEnv;
+  adapter?: (input: HarnessTaskInput & { harness: Exclude<HarnessId, "pi"> }) => Promise<{
+    output: string;
+    stderr: string;
+    exitCode: number | null;
+    timedOut: boolean;
+    truncated: boolean;
+    redacted: boolean;
+    childSessionId?: string;
+  }>;
 }
 
 export async function executeHarnessTask(
@@ -83,7 +97,11 @@ export async function executeHarnessTask(
   const stateOptions = { ...options.state, env };
   const record = await getRouteRecord(input.routeId, stateOptions);
   if (!record) throw new Error("Unknown or expired harness route");
-  if (record.harness !== input.harness)
+  const selectedExecution = decodeNormalizedCandidateId(input.model);
+  if (
+    record.harness !== input.harness ||
+    (selectedExecution && selectedExecution.harness !== input.harness)
+  )
     throw new Error("Harness does not match the route decision");
   if (record.selectedCandidate !== input.model) {
     throw new Error("Model does not match the route decision");
@@ -93,6 +111,7 @@ export async function executeHarnessTask(
   }
   await updateRouteOutcome(input.routeId, "running", {}, stateOptions);
   const candidates = executionCandidates(input, record);
+  const selectedTarget = executionTarget(input.model, input.harness);
   const attemptChain: HarnessExecutionAttempt[] = [];
   let lastResult: Omit<HarnessTaskResult, "attemptChain"> | undefined;
   for (const [index, candidate] of candidates.entries()) {
@@ -105,7 +124,14 @@ export async function executeHarnessTask(
     let thrownMessage: string | undefined;
     try {
       raw = await executeWithAdapter(
-        { ...input, model: candidate.model, reasoningEffort: candidate.reasoningEffort },
+        {
+          ...input,
+          harness: candidate.harness,
+          model: candidate.model,
+          reasoningEffort: candidate.reasoningEffort,
+          resumeSessionId:
+            candidate.harness === selectedTarget.harness ? input.resumeSessionId : undefined,
+        },
         options,
         env,
         record.featureSummary,
@@ -131,6 +157,8 @@ export async function executeHarnessTask(
       : classifyHarnessError(errorText, raw?.exitCode ?? null, Boolean(raw?.timedOut));
     const attempt: HarnessExecutionAttempt = {
       candidateId: candidate.model,
+      executionHarness: candidate.harness,
+      executionModel: candidate.executionModel,
       reasoningEffort: candidate.reasoningEffort,
       attemptOrder: index + 1,
       outcome,
@@ -157,6 +185,8 @@ export async function executeHarnessTask(
       routeId: input.routeId,
       harness: input.harness,
       model: candidate.model,
+      executionHarness: candidate.harness,
+      executionModel: candidate.executionModel,
       reasoningEffort: candidate.reasoningEffort,
       output: raw?.output ?? "",
       stderr: (thrownMessage ?? raw?.stderr ?? "").slice(0, 8_000),
@@ -193,8 +223,21 @@ export async function executeHarnessTask(
 function executionCandidates(
   input: HarnessTaskInput,
   record: Awaited<ReturnType<typeof getRouteRecord>> & {},
-): Array<{ model: string; reasoningEffort: ReasoningEffort }> {
-  const candidates = [{ model: input.model, reasoningEffort: input.reasoningEffort }];
+): Array<{
+  model: string;
+  harness: Exclude<HarnessId, "pi">;
+  executionModel: string;
+  reasoningEffort: ReasoningEffort;
+}> {
+  const initial = executionTarget(input.model, input.harness);
+  const candidates = [
+    {
+      model: input.model,
+      harness: initial.harness,
+      executionModel: initial.model,
+      reasoningEffort: input.reasoningEffort,
+    },
+  ];
   for (const ranked of [...(record.candidateRankings ?? [])].sort((a, b) => a.rank - b.rank)) {
     if (ranked.candidateId === input.model || ranked.candidateId === record.fallbackModel) continue;
     // Older records did not persist kind. They are deliberately not eligible for automatic
@@ -204,12 +247,25 @@ function executionCandidates(
       (window) => window.candidateId === ranked.candidateId,
     );
     if (health?.cooldownUntil && Date.parse(health.cooldownUntil) > Date.now()) continue;
+    const target = executionTarget(ranked.candidateId, input.harness);
     candidates.push({
       model: ranked.candidateId,
+      harness: target.harness,
+      executionModel: target.model,
       reasoningEffort: ranked.reasoningEffort ?? input.reasoningEffort,
     });
   }
   return candidates;
+}
+
+function executionTarget(
+  candidateId: string,
+  fallbackHarness: HarnessId,
+): { harness: Exclude<HarnessId, "pi">; model: string } {
+  const decoded = decodeNormalizedCandidateId(candidateId);
+  if (decoded) return decoded;
+  if (fallbackHarness === "pi") throw new Error("pi native execution is not available yet");
+  return { harness: fallbackHarness, model: candidateId };
 }
 
 function mayTryNext(
@@ -293,8 +349,12 @@ async function executeWithAdapter(
   env: NodeJS.ProcessEnv,
   featureSummary: { taskType: string; scope: string; complexity: number; risk: number },
 ) {
+  const target = executionTarget(input.model, input.harness);
+  if (options.adapter) {
+    return options.adapter({ ...input, harness: target.harness, model: target.model });
+  }
   const common = {
-    model: input.model,
+    model: target.model,
     reasoningEffort: input.reasoningEffort,
     objective: input.objective,
     conversationSummary: input.conversationSummary,
@@ -314,7 +374,7 @@ async function executeWithAdapter(
       featureSummary,
     }),
   };
-  if (input.harness === "codex") {
+  if (target.harness === "codex") {
     if (input.resumeSessionId) {
       throw new Error(
         "Codex trajectory resume is disabled because `codex exec resume --help` does not expose the required workspace sandbox controls",
@@ -323,11 +383,11 @@ async function executeWithAdapter(
     const result = await executeCodexTask(common, { ...options.codex, env });
     return { ...result, childSessionId: undefined };
   }
-  if (input.harness === "opencode") {
+  if (target.harness === "opencode") {
     const result = await executeOpenCodeTask(common, { ...options.opencode, env });
     return { ...result, childSessionId: result.sessionId };
   }
-  if (input.harness === "claude-code") {
+  if (target.harness === "claude-code") {
     const result = await executeClaudeTask(common, { ...options.claude, env });
     return { ...result, childSessionId: result.sessionId };
   }

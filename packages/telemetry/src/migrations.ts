@@ -114,6 +114,54 @@ const migrations = [
     ALTER TABLE route_candidates ADD COLUMN rank_index INTEGER;
     CREATE INDEX IF NOT EXISTS idx_route_candidates_rank ON route_candidates(route_id, rank_index);
   `,
+  `
+    CREATE TABLE native_routes (
+      route_id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      harness TEXT NOT NULL,
+      session_hash TEXT,
+      task_id_hash TEXT,
+      task_fingerprint TEXT NOT NULL,
+      workspace_fingerprint TEXT NOT NULL,
+      requirements_fingerprint TEXT,
+      affinity_expires_at INTEGER,
+      selected_candidate TEXT,
+      outcome TEXT NOT NULL,
+      profile TEXT NOT NULL,
+      record_json TEXT NOT NULL
+    );
+    CREATE TABLE native_route_jobs (
+      job_id TEXT PRIMARY KEY,
+      route_id TEXT NOT NULL REFERENCES native_routes(route_id) ON DELETE CASCADE,
+      status TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_native_routes_updated ON native_routes(updated_at DESC);
+    CREATE INDEX idx_native_routes_harness_updated ON native_routes(harness, updated_at DESC);
+    CREATE INDEX idx_native_routes_outcome_updated ON native_routes(outcome, updated_at DESC);
+    CREATE INDEX idx_native_routes_affinity ON native_routes(
+      harness, task_id_hash, session_hash, task_fingerprint, workspace_fingerprint,
+      requirements_fingerprint, affinity_expires_at
+    );
+    CREATE INDEX idx_native_route_jobs_route_status ON native_route_jobs(route_id, status);
+  `,
+  `
+    ALTER TABLE native_route_jobs ADD COLUMN idempotency_key_hash TEXT;
+    ALTER TABLE native_route_jobs ADD COLUMN execution_hash TEXT;
+    ALTER TABLE native_route_jobs ADD COLUMN permission TEXT;
+    ALTER TABLE native_route_jobs ADD COLUMN created_at TEXT;
+    ALTER TABLE native_route_jobs ADD COLUMN started_at TEXT;
+    ALTER TABLE native_route_jobs ADD COLUMN completed_at TEXT;
+    ALTER TABLE native_route_jobs ADD COLUMN progress_json TEXT;
+    ALTER TABLE native_route_jobs ADD COLUMN error_code TEXT;
+    ALTER TABLE native_route_jobs ADD COLUMN child_session_hash TEXT;
+    ALTER TABLE native_route_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0;
+    CREATE UNIQUE INDEX idx_native_route_jobs_idempotency
+      ON native_route_jobs(idempotency_key_hash) WHERE idempotency_key_hash IS NOT NULL;
+    CREATE INDEX idx_native_route_jobs_status_updated
+      ON native_route_jobs(status, updated_at DESC);
+  `,
 ];
 
 export function migrate(database: Database.Database): void {

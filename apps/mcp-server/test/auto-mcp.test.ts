@@ -67,6 +67,12 @@ describe("auto routing over MCP", () => {
           "delegate_codex_task",
           "route_harness_task",
           "delegate_harness_task",
+          "route_and_start_harness_task",
+          "start_harness_task",
+          "get_harness_task",
+          "cancel_harness_task",
+          "resume_harness_task",
+          "list_harness_tasks",
           "explain_harness_route",
           "submit_harness_feedback",
         ]),
@@ -158,6 +164,65 @@ describe("auto routing over MCP", () => {
         arguments: { routeId: harnessDecision.routeId, outcome: "success" },
       });
       expect(feedback.isError).toBeUndefined();
+
+      const asyncStarted = await client.callTool({
+        name: "route_and_start_harness_task",
+        arguments: {
+          harness: "codex",
+          harnesses: ["codex"],
+          objective: "Fix the auth architecture across multiple files",
+          workspaceRoot: workspace,
+          currentModel: "Current Model Medium",
+          idempotencyKey: "mcp-async-one",
+          permission: "read-only",
+          profile: "quality",
+          requirements: { tools: true, edit: true },
+        },
+      });
+      expect(asyncStarted.isError).toBeUndefined();
+      const asyncResult = asyncStarted.structuredContent as {
+        result: {
+          route: { selected: { id: string; executionModel: string } };
+          job: { jobId: string };
+        };
+      };
+      expect(asyncResult.result.route.selected).toMatchObject({
+        id: "codex:gpt-frontier",
+        executionModel: "gpt-frontier",
+      });
+      const jobId = asyncResult.result.job.jobId;
+      let asyncStatus = "queued";
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const polled = await client.callTool({
+          name: "get_harness_task",
+          arguments: { jobId },
+        });
+        const view = (polled.structuredContent as { result: { job: { status: string } } }).result;
+        asyncStatus = view.job.status;
+        if (!["queued", "starting", "running"].includes(asyncStatus)) break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(asyncStatus).toBe("succeeded");
+      const replayed = await client.callTool({
+        name: "route_and_start_harness_task",
+        arguments: {
+          harness: "codex",
+          harnesses: ["codex"],
+          objective: "Fix the auth architecture across multiple files",
+          workspaceRoot: workspace,
+          currentModel: "Current Model Medium",
+          idempotencyKey: "mcp-async-one",
+          permission: "read-only",
+          profile: "quality",
+          requirements: { tools: true, edit: true },
+        },
+      });
+      expect(replayed.isError).toBeUndefined();
+      expect(
+        (replayed.structuredContent as { result: { job: { jobId: string } } }).result.job.jobId,
+      ).toBe(jobId);
+      const listed = await client.callTool({ name: "list_harness_tasks", arguments: {} });
+      expect(listed.isError, JSON.stringify(listed.content)).toBeUndefined();
     } finally {
       await client.close();
       await server.close();

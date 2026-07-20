@@ -1,14 +1,17 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AutoRouteDecision } from "@model-router/contracts";
 import { describe, expect, it } from "vitest";
 import {
   findAffinity,
+  getNativeRouteHistory,
+  getNativeRouteStats,
   getRouteRecord,
   newRouteId,
   observedMetrics,
   persistDecision,
+  pruneNativeRoutes,
   recordRouteAttempt,
   recordRouteFeedback,
   routeIdentity,
@@ -72,7 +75,7 @@ function decision(routeId: string): AutoRouteDecision {
 }
 
 describe("harness route state", () => {
-  it("persists privacy-safe affinity and outcome updates as append-only records", async () => {
+  it("persists privacy-safe affinity and outcome updates in SQLite", async () => {
     const root = await mkdtemp(join(tmpdir(), "model-router-state-"));
     const options = { path: join(root, "routes.jsonl") };
     const identity = routeIdentity({
@@ -95,10 +98,11 @@ describe("harness route state", () => {
     expect(updated).toMatchObject({ outcome: "failure", partialWriteDetected: true });
     expect((await getRouteRecord(routeId, options))?.outcome).toBe("failure");
     expect(await findAffinity("opencode", identity, options)).toBeUndefined();
-    const stored = await readFile(options.path, "utf8");
+    const stored = (await readFile(join(root, "routes.sqlite"))).toString();
     expect(stored).not.toContain("private-session");
     expect(stored).not.toContain("Implement the feature");
-    expect(stored.trim().split("\n")).toHaveLength(2);
+    expect(stored).not.toContain("child failed");
+    expect(stored).toContain(routeId);
   });
 
   it("returns no records for a missing store and rejects unknown updates", async () => {
@@ -161,7 +165,7 @@ describe("harness route state", () => {
     expect(await findAffinity("opencode", incompatible, options)).toBeUndefined();
     now += 1_001;
     expect(await findAffinity("opencode", reworded, options)).toBeUndefined();
-    const stored = await readFile(options.path, "utf8");
+    const stored = (await readFile(join(root, "routes.sqlite"))).toString();
     expect(stored).not.toContain("opaque-task-123");
     expect(stored).not.toContain("different wording");
   });
@@ -232,8 +236,121 @@ describe("harness route state", () => {
         feedbackSamples: 1,
       },
     });
-    const stored = await readFile(options.path, "utf8");
+    const stored = (await readFile(join(root, "routes.sqlite"))).toString();
     expect(stored).not.toContain("private objective text");
     expect(stored).not.toContain("/private/workspace");
+  });
+
+  it("imports the latest valid legacy JSONL record idempotently and leaves the source untouched", async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), "model-router-source-"));
+    const sourceOptions = { path: join(sourceRoot, "source.jsonl") };
+    const routeId = newRouteId();
+    const original = await persistDecision(
+      decision(routeId),
+      routeIdentity({
+        harness: "opencode",
+        objective: "safe source",
+        workspaceRoot: "/tmp/source",
+      }),
+      sourceOptions,
+    );
+    const root = await mkdtemp(join(tmpdir(), "model-router-import-"));
+    const options = { path: join(root, "routes.jsonl") };
+    const latest = {
+      ...original,
+      updatedAt: "2099-01-01T00:00:00.000Z",
+      outcome: "success",
+      objective: "must-not-be-imported",
+      sessionId: "must-not-be-imported",
+      workspaceRoot: "/must/not/be/imported",
+    };
+    const legacy = `${JSON.stringify(original)}\nnot-json\n${JSON.stringify(latest)}\n`;
+    await writeFile(options.path, legacy);
+
+    expect(await getRouteRecord(routeId, options)).toMatchObject({ outcome: "success" });
+    expect(await getRouteRecord(routeId, options)).toMatchObject({ outcome: "success" });
+    expect(await readFile(options.path, "utf8")).toBe(legacy);
+    const stored = (await readFile(join(root, "routes.sqlite"))).toString();
+    expect(stored).not.toContain("must-not-be-imported");
+    expect(stored).not.toContain("/must/not/be/imported");
+    expect(
+      await pruneNativeRoutes(
+        {
+          before: "2100-01-01T00:00:00.000Z",
+          now: Date.parse("2100-01-01T00:00:00.000Z"),
+        },
+        options,
+      ),
+    ).toBe(1);
+    expect(await getRouteRecord(routeId, options)).toBeUndefined();
+    expect(await readFile(options.path, "utf8")).toBe(legacy);
+  });
+
+  it("exposes filtered history and aggregate native statistics", async () => {
+    const root = await mkdtemp(join(tmpdir(), "model-router-history-"));
+    const options = { path: join(root, "routes.jsonl") };
+    const successful = newRouteId();
+    await persistDecision(
+      decision(successful),
+      routeIdentity({ harness: "opencode", objective: "one", workspaceRoot: "/tmp/one" }),
+      options,
+    );
+    await recordRouteAttempt(
+      successful,
+      { candidateId: "candidate-a", attemptOrder: 1, outcome: "success", latencyMs: 20 },
+      options,
+    );
+    await updateRouteOutcome(successful, "success", {}, options);
+    await persistDecision(
+      decision(newRouteId()),
+      routeIdentity({ harness: "opencode", objective: "two", workspaceRoot: "/tmp/two" }),
+      options,
+    );
+
+    expect(await getNativeRouteHistory({ outcome: "success", limit: 10 }, options)).toHaveLength(1);
+    expect(await getNativeRouteStats({ harness: "opencode" }, options)).toMatchObject({
+      totalRoutes: 2,
+      activeRoutes: 1,
+      totalAttempts: 1,
+      successfulAttempts: 1,
+      averageAttemptLatencyMs: 20,
+      byHarness: { opencode: 2 },
+      byOutcome: { planned: 1, success: 1 },
+    });
+  });
+
+  it("prunes expired terminal history while preserving active routes and live affinity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "model-router-retention-"));
+    const activeOptions = { path: join(root, "routes.jsonl"), affinityTtlMs: 1 };
+    const expired = newRouteId();
+    await persistDecision(
+      decision(expired),
+      routeIdentity({ harness: "opencode", objective: "expired", workspaceRoot: "/tmp/a" }),
+      activeOptions,
+    );
+    await updateRouteOutcome(expired, "failure", {}, activeOptions);
+    const active = newRouteId();
+    await persistDecision(
+      decision(active),
+      routeIdentity({ harness: "opencode", objective: "active", workspaceRoot: "/tmp/b" }),
+      activeOptions,
+    );
+    const liveAffinity = newRouteId();
+    await persistDecision(
+      decision(liveAffinity),
+      routeIdentity({ harness: "opencode", objective: "affinity", workspaceRoot: "/tmp/c" }),
+      { ...activeOptions, affinityTtlMs: 60_000 },
+    );
+    await updateRouteOutcome(liveAffinity, "success", {}, activeOptions);
+
+    expect(
+      await pruneNativeRoutes(
+        { before: "2099-01-01T00:00:00.000Z", now: Date.now() + 2 },
+        activeOptions,
+      ),
+    ).toBe(1);
+    expect(await getRouteRecord(expired, activeOptions)).toBeUndefined();
+    expect(await getRouteRecord(active, activeOptions)).toBeDefined();
+    expect(await getRouteRecord(liveAffinity, activeOptions)).toBeDefined();
   });
 });

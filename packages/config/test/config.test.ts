@@ -23,6 +23,39 @@ describe("router config", () => {
     const config = routerConfigSchema.parse(base);
     expect(config.server.host).toBe("127.0.0.1");
     expect(config.privacy.storePrompts).toBe(false);
+    expect(config.nativeRouting).toEqual({
+      defaultProfile: "balanced",
+      repositoryProfiles: {},
+      profiles: {},
+    });
+  });
+
+  it("accepts additive native policies and rejects undefined profile selection", () => {
+    const config = routerConfigSchema.parse({
+      ...base,
+      nativeRouting: {
+        defaultProfile: "repo-safe",
+        repositoryProfiles: { "my-repo": "quality" },
+        profiles: {
+          "repo-safe": {
+            extends: "balanced",
+            policy: {
+              harnesses: { allow: ["codex", "opencode"] },
+              candidates: { deny: ["retired"], prefer: { fast: 0.1 } },
+              effort: { cap: "high" },
+              aliases: { fast: "provider/fast" },
+            },
+          },
+        },
+      },
+    });
+    expect(config.nativeRouting?.profiles["repo-safe"]?.policy.effort.cap).toBe("high");
+    expect(() =>
+      routerConfigSchema.parse({
+        ...base,
+        nativeRouting: { defaultProfile: "missing", profiles: {} },
+      }),
+    ).toThrow(/native default profile is not defined/);
   });
 
   it("rejects duplicate model IDs", () => {

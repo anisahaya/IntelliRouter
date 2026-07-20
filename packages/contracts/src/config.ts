@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { nativeRoutingConfigSchema } from "./auto-route.js";
 import { protocolSchema } from "./protocol.js";
 
 export const capabilitySchema = z.object({
@@ -67,6 +68,7 @@ export const routerConfigSchema = z
         hashSessionIds: z.boolean().default(true),
       })
       .prefault({}),
+    nativeRouting: nativeRoutingConfigSchema.optional(),
     models: z.array(modelDefinitionSchema).min(1),
     routing: z
       .object({

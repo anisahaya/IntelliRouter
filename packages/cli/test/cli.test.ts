@@ -1,12 +1,15 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AutoRouteDecision } from "@model-router/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { persistDecision, routeIdentity } from "../../../apps/mcp-server/src/route-state.js";
 import { initConfig } from "../src/config-init.js";
 import { doctor } from "../src/doctor.js";
 import { explainRoute } from "../src/explain.js";
 import { submitFeedback } from "../src/feedback.js";
 import { controlRequest } from "../src/http.js";
+import { nativeHistory, nativeStats } from "../src/native-state.js";
 import { routeTask } from "../src/route.js";
 import { getStats } from "../src/stats.js";
 
@@ -15,6 +18,7 @@ afterEach(() => {
   delete process.env.MODEL_ROUTER_BASE_URL;
   delete process.env.MODEL_ROUTER_AUTH_TOKEN;
   delete process.env.DOCTOR_MISSING_KEY;
+  delete process.env.MODEL_ROUTER_STATE_PATH;
 });
 
 describe("CLI clients", () => {
@@ -92,5 +96,71 @@ describe("CLI clients", () => {
     expect((await doctor(path, true)).probes).toEqual([
       { model: "example", reachable: true, status: 200 },
     ]);
+  });
+
+  it("reads native history and statistics from the SQLite route store", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "router-cli-native-"));
+    process.env.MODEL_ROUTER_STATE_PATH = join(directory, "legacy.jsonl");
+    const decision = {
+      routeId: "3ac7206b-3d86-4eb4-a240-f9f07852568b",
+      harness: "opencode",
+      affinityReused: false,
+      status: "planned",
+      selected: {
+        id: "candidate-a",
+        kind: "harness-model",
+        displayName: "A",
+        execution: "opencode-run",
+      },
+      profile: "balanced",
+      taskProfile: {
+        taskType: "implementation",
+        complexity: 0.5,
+        ambiguity: 0.2,
+        risk: 0.2,
+        mechanical: 0.3,
+        scope: "single",
+        toolsRequired: true,
+        visionRequired: false,
+        searchRequired: false,
+        editRequired: true,
+        estimatedContextTokens: 100,
+        desiredEffort: "medium",
+        repoTags: [],
+      },
+      repoSignals: {
+        rootName: "repo",
+        languages: [],
+        fileCount: 1,
+        testFileCount: 0,
+        manifests: [],
+        changedFileCount: 0,
+        diffInsertions: 0,
+        diffDeletions: 0,
+        hasTests: false,
+        monorepo: false,
+        dirty: false,
+        truncated: false,
+        changedFiles: [],
+        topLevelDirectories: [],
+        dependencyNames: [],
+        packageCount: 0,
+        hasCi: false,
+      },
+      ranked: [],
+      excluded: [],
+      fallback: { kind: "current-model", harness: "opencode" },
+      context: { objectiveTruncated: false, conversationTruncated: false },
+    } satisfies AutoRouteDecision;
+    await persistDecision(
+      decision,
+      routeIdentity({ harness: "opencode", objective: "private", workspaceRoot: "/tmp/private" }),
+    );
+    expect(await nativeHistory({ harness: "opencode" })).toHaveLength(1);
+    expect(await nativeStats({ harness: "opencode" })).toMatchObject({
+      totalRoutes: 1,
+      activeRoutes: 1,
+      byHarness: { opencode: 1 },
+    });
   });
 });

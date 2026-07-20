@@ -93,9 +93,13 @@ Full skill-side setup and controls are documented in [advanced-self-hosting.md](
 
 ### MCP tools
 
-The primary tools are `route_harness_task`, `delegate_harness_task`, `explain_harness_route`, and `submit_harness_feedback`. The Codex-only pair and six legacy gateway tools remain for backward compatibility.
+The primary synchronous tools are `route_harness_task`, `delegate_harness_task`, `explain_harness_route`, and `submit_harness_feedback`. Durable execution adds `route_and_start_harness_task`, `start_harness_task`, `get_harness_task`, `cancel_harness_task`, `resume_harness_task`, and `list_harness_tasks`. The Codex-only pair and six legacy gateway tools remain for backward compatibility.
 
-Routes contain a UUID, harness/session identity, selected candidate/effort, fallback, bounded feature summary, affinity state, and outcome. Raw prompts and conversations are not persisted. Delegation revalidates the catalog and route, prevents recursion, bounds context/output, contains process trees, locks writers, and reports whether a failed write left the workspace unsafe for automatic fallback.
+Set `harness: "auto"` to discover Codex, OpenCode, and Claude Code concurrently, or pass `harnesses` to compare an explicit subset. Cross-harness candidates use collision-safe IDs (`codex:<model>`, `opencode:<provider/model>`, and `claude-code:<alias>`), while `executionHarness` and `executionModel` expose the exact adapter coordinates. Pi is reported as excluded until it has native discovery and execution adapters. Existing single-harness calls keep their original IDs and behavior.
+
+Routes contain a UUID, harness/session identity, selected candidate/effort, fallback, bounded feature summary, affinity state, and outcome. Raw prompts and conversations are not persisted. Delegation revalidates the catalog and route, prevents recursion, bounds context/output, contains process trees, locks writers, and reports whether a failed write left the workspace unsafe for automatic fallback. A cross-harness read-only route may continue through its persisted normalized ranking after an allowlisted transient failure. Write fallback still requires `allowWriteFallback: true` and stops immediately if repository signals detect a partial write.
+
+`route_and_start_harness_task` commits its route and queued job in one SQLite transaction. An idempotency key returns the same job for an identical request and rejects reuse for different content. Durable records contain hashes of the idempotency key, immutable execution envelope, workspace, and optional child session plus coarse timestamps, status, attempt count, outcome, and partial-write safety. They never contain raw objectives, summaries, acceptance checks, workspace paths, credentials, adapter output, stderr, or child session IDs. Terminal output is available from `get_harness_task` only while the originating server process retains it in memory. On restart, `starting` and `running` jobs become terminal `orphaned` records; resume requires the caller to resubmit the matching envelope and, when present, the matching raw child session token. Cancellation is cooperative: queued jobs stop immediately, while a running adapter is marked cancel-requested and its result is discarded when it returns.
 
 ### API
 
@@ -116,6 +120,13 @@ Control endpoints:
 - `POST /router/models/:id/probe`
 
 Use `model: "auto"`, `router/economy`, `router/balanced`, or `router/premium`. Headers `x-router-model`, `x-router-session`, and `x-router-profile` pin a model, enable affinity, or override the policy. Compatibility responses identify the request, route decision, model, profile, and fallback count.
+
+Native harness routing can also load the optional `nativeRouting` configuration in
+`examples/router.config.example.yaml`. It supports repository profiles, harness and candidate
+allow/deny rules, bounded score preferences, effort caps, aliases, conservative metadata
+overrides, and locally measured route/attempt budgets. Route results persist both applied and
+ignored policy explanations. Policies may narrow live capabilities, but cannot invent tool,
+vision, search, edit, context, availability, or reasoning-effort support reported by a harness.
 
 A model `id` is the logical alias callers pin. `upstreamModel` is the provider's real model identifier, `provider` selects the wire adapter, and a routing profile is only a set of quality/cost/latency weights. Profiles are not models.
 
@@ -156,7 +167,7 @@ Additional limitations: health uses persisted recent-attempt windows and circuit
 ## Architecture
 
 ```text
-portable skill -> route_harness_task -> Codex/OpenCode catalog or Claude aliases
+portable skill -> route_harness_task -> one harness or concurrent native catalogs
      |                     |
      |                     +-> delegate_harness_task
      |

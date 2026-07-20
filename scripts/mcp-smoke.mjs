@@ -13,9 +13,11 @@ const client = new Client({ name: "model-router-smoke", version: "0.1.0" });
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 12);
+  assert.equal(tools.tools.length, 18);
   assert.ok(tools.tools.some((tool) => tool.name === "route_harness_task"));
   assert.ok(tools.tools.some((tool) => tool.name === "delegate_harness_task"));
+  assert.ok(tools.tools.some((tool) => tool.name === "route_and_start_harness_task"));
+  assert.ok(tools.tools.some((tool) => tool.name === "get_harness_task"));
   assert.ok(tools.tools.some((tool) => tool.name === "explain_harness_route"));
   assert.ok(tools.tools.some((tool) => tool.name === "submit_harness_feedback"));
   assert.ok(tools.tools.some((tool) => tool.name === "auto_route"));
@@ -39,7 +41,7 @@ try {
   });
   assert.equal(delegated.structuredContent.result.text, "mock");
   assert.equal(delegated.structuredContent.result.fallbackCount, 0);
-  process.stdout.write("mcp smoke: 12 tools registered and legacy proxy flow passed over stdio\n");
+  process.stdout.write("mcp smoke: 18 tools registered and legacy proxy flow passed over stdio\n");
 } finally {
   await client.close();
   await harness.close();

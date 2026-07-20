@@ -1,11 +1,20 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
   AutoObservedMetrics,
   FeedbackEvent,
+  HarnessRouteRecord,
+  NativeRouteHistoryFilters,
+  NativeRouteJob,
+  NativeRouteStats,
   RouteDecision,
   RouteStats,
+} from "@model-router/contracts";
+import {
+  harnessRouteRecordSchema,
+  nativeRouteHistoryFiltersSchema,
+  nativeRouteJobSchema,
 } from "@model-router/contracts";
 import type { ObservedModelMetrics, RouterState } from "@model-router/router-core";
 import Database from "better-sqlite3";
@@ -494,6 +503,315 @@ export class TelemetryStore implements RouterState {
     };
   }
 
+  saveNativeRoute(input: HarnessRouteRecord): HarnessRouteRecord {
+    const record = sanitizeNativeRoute(input);
+    this.database
+      .prepare(`INSERT INTO native_routes (
+        route_id, created_at, updated_at, harness, session_hash, task_id_hash, task_fingerprint,
+        workspace_fingerprint, requirements_fingerprint, affinity_expires_at,
+        selected_candidate, outcome, profile, record_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(route_id) DO UPDATE SET
+        created_at=excluded.created_at, updated_at=excluded.updated_at, harness=excluded.harness,
+        session_hash=excluded.session_hash, task_id_hash=excluded.task_id_hash,
+        task_fingerprint=excluded.task_fingerprint,
+        workspace_fingerprint=excluded.workspace_fingerprint,
+        requirements_fingerprint=excluded.requirements_fingerprint,
+        affinity_expires_at=excluded.affinity_expires_at,
+        selected_candidate=excluded.selected_candidate, outcome=excluded.outcome,
+        profile=excluded.profile, record_json=excluded.record_json
+      WHERE excluded.updated_at >= native_routes.updated_at`)
+      .run(
+        record.routeId,
+        record.createdAt,
+        record.updatedAt,
+        record.harness,
+        record.sessionHash ?? null,
+        record.taskIdHash ?? null,
+        record.taskFingerprint,
+        record.workspaceFingerprint,
+        record.requirementsFingerprint ?? null,
+        record.affinityExpiresAt ? Date.parse(record.affinityExpiresAt) : null,
+        record.selectedCandidate ?? null,
+        record.outcome,
+        record.profile,
+        JSON.stringify(record),
+      );
+    return record;
+  }
+
+  saveNativeRouteAndJob(route: HarnessRouteRecord, job: NativeRouteJob): NativeRouteJob {
+    return this.database.transaction(() => {
+      this.saveNativeRoute(route);
+      return this.createNativeRouteJob(job);
+    })();
+  }
+
+  createNativeRouteJob(input: NativeRouteJob): NativeRouteJob {
+    const job = nativeRouteJobSchema.parse(input);
+    const existing = this.getNativeRouteJobByIdempotencyHash(job.idempotencyKeyHash);
+    if (existing) {
+      if (existing.executionHash !== job.executionHash) {
+        throw new Error("Idempotency key was already used for a different execution request");
+      }
+      return existing;
+    }
+    this.database
+      .prepare(`INSERT INTO native_route_jobs (
+        job_id, route_id, status, updated_at, idempotency_key_hash, execution_hash, permission,
+        created_at, started_at, completed_at, progress_json, error_code, child_session_hash,
+        cancel_requested
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(
+        job.jobId,
+        job.routeId,
+        job.status,
+        job.updatedAt,
+        job.idempotencyKeyHash,
+        job.executionHash,
+        job.permission,
+        job.createdAt,
+        job.startedAt ?? null,
+        job.completedAt ?? null,
+        JSON.stringify(job.progress),
+        job.errorCode ?? null,
+        job.childSessionHash ?? null,
+        job.cancelRequested ? 1 : 0,
+      );
+    return job;
+  }
+
+  getNativeRouteJob(jobId: string): NativeRouteJob | undefined {
+    return this.#readNativeRouteJob("job_id = ?", jobId);
+  }
+
+  getNativeRouteJobByIdempotencyHash(hash: string): NativeRouteJob | undefined {
+    return this.#readNativeRouteJob("idempotency_key_hash = ?", hash);
+  }
+
+  listNativeRouteJobs(
+    input: { routeId?: string; status?: string; limit?: number } = {},
+  ): NativeRouteJob[] {
+    const where: string[] = ["idempotency_key_hash IS NOT NULL"];
+    const args: unknown[] = [];
+    if (input.routeId) {
+      where.push("route_id = ?");
+      args.push(input.routeId);
+    }
+    if (input.status) {
+      where.push("status = ?");
+      args.push(input.status);
+    }
+    const limit = Math.max(1, Math.min(1_000, input.limit ?? 50));
+    const rows = this.database
+      .prepare(`SELECT * FROM native_route_jobs WHERE ${where.join(" AND ")}
+        ORDER BY updated_at DESC, job_id ASC LIMIT ?`)
+      .all(...args, limit) as NativeRouteJobRow[];
+    return rows.map(nativeRouteJobFromRow);
+  }
+
+  updateNativeRouteJob(job: NativeRouteJob): NativeRouteJob {
+    const parsed = nativeRouteJobSchema.parse(job);
+    const result = this.database
+      .prepare(`UPDATE native_route_jobs SET
+        status = ?, updated_at = ?, started_at = ?, completed_at = ?, progress_json = ?,
+        error_code = ?, child_session_hash = ?, cancel_requested = ?
+        WHERE job_id = ? AND execution_hash = ?`)
+      .run(
+        parsed.status,
+        parsed.updatedAt,
+        parsed.startedAt ?? null,
+        parsed.completedAt ?? null,
+        JSON.stringify(parsed.progress),
+        parsed.errorCode ?? null,
+        parsed.childSessionHash ?? null,
+        parsed.cancelRequested ? 1 : 0,
+        parsed.jobId,
+        parsed.executionHash,
+      );
+    if (result.changes !== 1) throw new Error(`Unknown native route job: ${parsed.jobId}`);
+    return parsed;
+  }
+
+  recoverNativeRouteJobs(now = new Date(this.#now()).toISOString()): number {
+    const rows = this.database
+      .prepare(
+        "SELECT * FROM native_route_jobs WHERE status IN ('starting', 'running') AND idempotency_key_hash IS NOT NULL",
+      )
+      .all() as NativeRouteJobRow[];
+    const update = this.database.transaction(() => {
+      for (const row of rows) {
+        const job = nativeRouteJobFromRow(row);
+        this.updateNativeRouteJob({
+          ...job,
+          status: "orphaned",
+          updatedAt: now,
+          completedAt: now,
+          progress: { ...job.progress, stage: "terminal", resultAvailable: false },
+          errorCode: "process-restarted",
+        });
+      }
+    });
+    update();
+    return rows.length;
+  }
+
+  #readNativeRouteJob(where: string, value: string): NativeRouteJob | undefined {
+    const row = this.database
+      .prepare(`SELECT * FROM native_route_jobs WHERE ${where}`)
+      .get(value) as NativeRouteJobRow | undefined;
+    if (!row || !row.idempotency_key_hash) return undefined;
+    return nativeRouteJobFromRow(row);
+  }
+
+  importNativeRoutes(records: readonly unknown[], sourceKey?: string): number {
+    const metadataKey = sourceKey ? `native_route_import:${sourceKey}` : undefined;
+    if (
+      metadataKey &&
+      this.database.prepare("SELECT 1 FROM installation_metadata WHERE key = ?").get(metadataKey)
+    ) {
+      return 0;
+    }
+    const latest = new Map<string, HarnessRouteRecord>();
+    for (const input of records) {
+      const parsed = harnessRouteRecordSchema.safeParse(input);
+      if (!parsed.success) continue;
+      const current = latest.get(parsed.data.routeId);
+      if (!current || parsed.data.updatedAt >= current.updatedAt) {
+        latest.set(parsed.data.routeId, parsed.data);
+      }
+    }
+    const before = this.database
+      .prepare("SELECT COUNT(*) FROM native_routes")
+      .pluck()
+      .get() as number;
+    this.database.transaction(() => {
+      for (const record of latest.values()) this.saveNativeRoute(record);
+      if (metadataKey) {
+        this.database
+          .prepare("INSERT INTO installation_metadata(key, value) VALUES (?, ?)")
+          .run(metadataKey, new Date(this.#now()).toISOString());
+      }
+    })();
+    const after = this.database
+      .prepare("SELECT COUNT(*) FROM native_routes")
+      .pluck()
+      .get() as number;
+    return after - before;
+  }
+
+  getNativeRoute(routeId: string): HarnessRouteRecord | undefined {
+    const row = this.database
+      .prepare("SELECT record_json FROM native_routes WHERE route_id = ?")
+      .get(routeId) as { record_json: string } | undefined;
+    if (!row) return undefined;
+    return harnessRouteRecordSchema.parse(JSON.parse(row.record_json));
+  }
+
+  getAllNativeRoutes(): HarnessRouteRecord[] {
+    const rows = this.database
+      .prepare("SELECT record_json FROM native_routes ORDER BY updated_at ASC, route_id ASC")
+      .all() as Array<{ record_json: string }>;
+    return rows.map((row) => harnessRouteRecordSchema.parse(JSON.parse(row.record_json)));
+  }
+
+  getNativeRouteHistory(filters: NativeRouteHistoryFilters = {}): HarnessRouteRecord[] {
+    const parsed = nativeRouteHistoryFiltersSchema.parse(filters);
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (parsed.since) {
+      where.push("updated_at >= ?");
+      args.push(parsed.since);
+    }
+    if (parsed.harness) {
+      where.push("harness = ?");
+      args.push(parsed.harness);
+    }
+    if (parsed.outcome) {
+      where.push("outcome = ?");
+      args.push(parsed.outcome);
+    }
+    const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const rows = this.database
+      .prepare(`SELECT record_json FROM native_routes ${clause}
+        ORDER BY updated_at DESC, route_id ASC LIMIT ?`)
+      .all(...args, parsed.limit) as Array<{ record_json: string }>;
+    return rows.map((row) => harnessRouteRecordSchema.parse(JSON.parse(row.record_json)));
+  }
+
+  getNativeRouteStats(filters: Omit<NativeRouteHistoryFilters, "limit"> = {}): NativeRouteStats {
+    const parsed = nativeRouteHistoryFiltersSchema.parse({ ...filters, limit: 1_000 });
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (parsed.since) {
+      where.push("updated_at >= ?");
+      args.push(parsed.since);
+    }
+    if (parsed.harness) {
+      where.push("harness = ?");
+      args.push(parsed.harness);
+    }
+    if (parsed.outcome) {
+      where.push("outcome = ?");
+      args.push(parsed.outcome);
+    }
+    const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const records = this.database
+      .prepare(`SELECT harness, outcome, selected_candidate, record_json
+        FROM native_routes ${clause}`)
+      .all(...args) as Array<{
+      harness: string;
+      outcome: string;
+      selected_candidate: string | null;
+      record_json: string;
+    }>;
+    const byHarness: Record<string, number> = {};
+    const byOutcome: Record<string, number> = {};
+    const byCandidate: Record<string, number> = {};
+    let totalAttempts = 0;
+    let successfulAttempts = 0;
+    let totalLatency = 0;
+    for (const row of records) {
+      byHarness[row.harness] = (byHarness[row.harness] ?? 0) + 1;
+      byOutcome[row.outcome] = (byOutcome[row.outcome] ?? 0) + 1;
+      if (row.selected_candidate) {
+        byCandidate[row.selected_candidate] = (byCandidate[row.selected_candidate] ?? 0) + 1;
+      }
+      const record = harnessRouteRecordSchema.parse(JSON.parse(row.record_json));
+      for (const attempt of record.attempts ?? []) {
+        totalAttempts++;
+        successfulAttempts += attempt.outcome === "success" ? 1 : 0;
+        totalLatency += attempt.latencyMs;
+      }
+    }
+    return {
+      totalRoutes: records.length,
+      activeRoutes: records.filter((row) => row.outcome === "planned" || row.outcome === "running")
+        .length,
+      totalAttempts,
+      successfulAttempts,
+      averageAttemptLatencyMs: totalAttempts ? totalLatency / totalAttempts : 0,
+      byHarness,
+      byOutcome,
+      byCandidate,
+    };
+  }
+
+  pruneNativeRoutes(input: { before: string; now?: number }): number {
+    const before = Date.parse(input.before);
+    if (!Number.isFinite(before)) throw new Error("Invalid native route retention cutoff");
+    return this.database
+      .prepare(`DELETE FROM native_routes
+        WHERE updated_at < ?
+          AND outcome NOT IN ('planned', 'running')
+          AND (affinity_expires_at IS NULL OR affinity_expires_at <= ?)
+          AND NOT EXISTS (
+            SELECT 1 FROM native_route_jobs j WHERE j.route_id = native_routes.route_id
+              AND j.status IN ('queued', 'starting', 'running')
+          )`)
+      .run(new Date(before).toISOString(), input.now ?? this.#now()).changes;
+  }
+
   getAffinity(sessionHash: string): string | undefined {
     const row = this.database
       .prepare("SELECT model_id, expires_at FROM session_affinity WHERE session_hash = ?")
@@ -514,4 +832,49 @@ export class TelemetryStore implements RouterState {
       .run(sessionHash, modelId, expiresAt);
     this.database.prepare("DELETE FROM session_affinity WHERE expires_at <= ?").run(this.#now());
   }
+}
+
+function sanitizeNativeRoute(input: unknown): HarnessRouteRecord {
+  const parsed = harnessRouteRecordSchema.parse(input);
+  if (!parsed.rerouteReason) return parsed;
+  const rerouteReason = /^sha256:[a-f0-9]{64}$/.test(parsed.rerouteReason)
+    ? parsed.rerouteReason
+    : `sha256:${createHash("sha256").update(parsed.rerouteReason).digest("hex")}`;
+  return { ...parsed, rerouteReason };
+}
+
+interface NativeRouteJobRow {
+  job_id: string;
+  route_id: string;
+  status: string;
+  updated_at: string;
+  idempotency_key_hash: string | null;
+  execution_hash: string | null;
+  permission: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  progress_json: string | null;
+  error_code: string | null;
+  child_session_hash: string | null;
+  cancel_requested: number;
+}
+
+function nativeRouteJobFromRow(row: NativeRouteJobRow): NativeRouteJob {
+  return nativeRouteJobSchema.parse({
+    jobId: row.job_id,
+    routeId: row.route_id,
+    status: row.status,
+    idempotencyKeyHash: row.idempotency_key_hash,
+    executionHash: row.execution_hash,
+    permission: row.permission,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    startedAt: row.started_at ?? undefined,
+    completedAt: row.completed_at ?? undefined,
+    progress: row.progress_json ? JSON.parse(row.progress_json) : undefined,
+    errorCode: row.error_code ?? undefined,
+    childSessionHash: row.child_session_hash ?? undefined,
+    cancelRequested: row.cancel_requested === 1,
+  });
 }
