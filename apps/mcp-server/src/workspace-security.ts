@@ -12,6 +12,18 @@ export async function resolveTrustedWorkspace(
   return workspace;
 }
 
+export async function revalidateTrustedWorkspace(
+  workspaceRoot: string,
+  trustedRoot = process.env.MODEL_ROUTER_WORKSPACE_ROOT ?? process.cwd(),
+): Promise<void> {
+  const [workspace, trusted] = await Promise.all([realpath(workspaceRoot), realpath(trustedRoot)]);
+  if (!isWithin(workspace, trusted)) {
+    throw new Error(
+      "workspace root moved outside the model router's trusted root during delegation",
+    );
+  }
+}
+
 export async function resolveTrustedFile(path: string, allowedRoots: string[]): Promise<string> {
   const file = await realpath(path);
   if (!(await stat(file)).isFile()) throw new Error("image path must be a file");

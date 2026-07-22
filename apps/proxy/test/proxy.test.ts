@@ -57,6 +57,23 @@ beforeAll(async () => {
       response.end(JSON.stringify({ error: { message: "bad upstream request" } }));
       return;
     }
+    if (body.forceUpstreamTokenLeak) {
+      response.writeHead(401, {
+        "content-type": "application/json",
+        "x-request-id": "upstream-401",
+      });
+      response.end(
+        JSON.stringify({
+          error: {
+            message: "Invalid token",
+            diagnostics:
+              "Authorization header Bearer sk-abc1234567890abcdef was rejected by upstream",
+            context: { auth: "key-ghp_abcdef1234567890", note: "Bearer xoxb-123456789012345" },
+          },
+        }),
+      );
+      return;
+    }
     if (body.forceFailure && body.model === "upstream-cheap") {
       response.writeHead(503, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { message: "temporary" } }));
@@ -258,6 +275,25 @@ describe("compatibility proxy", () => {
     expect(bad.statusCode).toBe(400);
     expect(bad.json().error.upstreamRequestId).toBe("upstream-400");
     expect(bad.json().error.upstream.error.message).toBe("bad upstream request");
+  });
+
+  it("redacts token literals in upstream error bodies (L2)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { "x-router-model": "cheap" },
+      payload: {
+        model: "auto",
+        forceUpstreamTokenLeak: true,
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+    expect(res.statusCode).toBe(401);
+    const body = res.body;
+    expect(body).not.toContain("sk-abc1234567890");
+    expect(body).not.toContain("ghp_abcdef1234567890");
+    expect(body).not.toContain("xoxb-123456789012345");
+    expect(body).toContain("[REDACTED]");
   });
 
   it("does not retry after stream bytes begin and propagates client cancellation", async () => {

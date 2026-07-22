@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
+import { parseBoundedJSON } from "@model-router/telemetry";
 
 const execFileAsync = promisify(execFile);
 const allowedEfforts = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh", "max", "ultra"]);
@@ -63,7 +64,7 @@ export async function discoverCodexCandidates(
   });
   let parsed: unknown;
   try {
-    parsed = JSON.parse(result.stdout);
+    parsed = parseBoundedJSON(result.stdout, 256 * 1024);
   } catch {
     throw new Error("codex debug models returned invalid JSON");
   }

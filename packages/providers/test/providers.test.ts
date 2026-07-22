@@ -1,6 +1,10 @@
 import type { ModelDefinition, NormalizedRequest } from "@model-router/contracts";
 import { modelDefinitionSchema } from "@model-router/contracts";
-import { AnthropicAdapter, OpenAICompatibleAdapter } from "@model-router/providers";
+import {
+  AnthropicAdapter,
+  assertSafeEgress,
+  OpenAICompatibleAdapter,
+} from "@model-router/providers";
 import { describe, expect, it } from "vitest";
 
 const model: ModelDefinition = modelDefinitionSchema.parse({
@@ -29,6 +33,12 @@ const request: NormalizedRequest = {
 };
 
 describe("provider adapters", () => {
+  it("rejects private and unsupported egress targets", async () => {
+    await expect(assertSafeEgress("https://10.0.0.1/v1")).rejects.toThrow();
+    await expect(assertSafeEgress("ftp://example.test")).rejects.toThrow();
+    await expect(assertSafeEgress("https://[fd00::1]/v1")).rejects.toThrow();
+    await expect(assertSafeEgress("https://does-not-exist.invalid/v1")).rejects.toThrow();
+  });
   it("preserves OpenAI payload fields while replacing only the model", () => {
     const prepared = new OpenAICompatibleAdapter().prepareRequest(model, request, "key");
     expect(prepared.url).toBe("https://provider.test/v1/chat/completions");

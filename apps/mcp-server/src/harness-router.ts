@@ -49,7 +49,7 @@ export async function routeHarnessTask(
   input: HarnessRouteInput,
   options: HarnessRouterOptions = {},
 ): Promise<AutoRouteDecision> {
-  const env = options.env ?? process.env;
+  const env = options.state?.env ?? options.env ?? process.env;
   assertRootInvocation(env);
   const workspaceRoot = await resolveTrustedWorkspace(input.workspaceRoot, options.trustedRoot);
   const objective = sanitizeText(input.objective, 12_000, "objective");

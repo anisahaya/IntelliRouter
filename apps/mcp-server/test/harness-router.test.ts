@@ -34,7 +34,10 @@ const repo: RepoCommandRunner = {
 describe("harness-neutral routing", () => {
   it("routes OpenCode with native catalog auth and reuses task affinity", async () => {
     const root = await mkdtemp(join(tmpdir(), "model-router-harness-route-"));
-    const state = { path: join(root, "routes.jsonl") };
+    const state = {
+      path: join(root, "routes.jsonl"),
+      env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },
+    };
     const input = {
       harness: "opencode" as const,
       objective: "Implement a multi-file TypeScript feature and tests",
@@ -114,7 +117,10 @@ describe("harness-neutral routing", () => {
       {
         claude: { runner: claude, availableModels: ["opus", "sonnet", "haiku"] },
         repo: { runner: repo },
-        state: { path: join(root, "routes.jsonl") },
+        state: {
+          path: join(root, "routes.jsonl"),
+          env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },
+        },
       },
     );
     expect(result.selected).toMatchObject({

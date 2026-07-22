@@ -3,11 +3,12 @@ import { resolveApiKey } from "@model-router/config";
 import type { ModelDefinition, Protocol, RouteDecision } from "@model-router/contracts";
 import { adapterFor, responseRequestId, UpstreamError } from "@model-router/providers";
 import { canFallback, type ErrorClass } from "@model-router/router-core";
+import { parseBoundedJSON, redactValue } from "@model-router/telemetry";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { RouterRuntime } from "../app.js";
 import { normalizeRequest } from "./normalize.js";
 
-const ERROR_PREVIEW_LIMIT = 16 * 1024;
+const ERROR_PREVIEW_LIMIT = 4 * 1024;
 
 export async function handleCompatibility(
   protocol: Protocol,
@@ -501,6 +502,8 @@ async function streamResponse(input: {
   let bytesEmitted = false;
   let sample = "";
   let sampleBytes = 0;
+  let totalStreamed = 0;
+  const streamLimit = runtime.config.server.responseLimitBytes;
   const decoder = new TextDecoder();
   try {
     const first = await reader.read();
@@ -508,6 +511,8 @@ async function streamResponse(input: {
     reply.raw.writeHead(upstream.status, reply.getHeaders() as OutgoingHttpHeaders);
     if (!first.done && first.value) {
       bytesEmitted = true;
+      totalStreamed += first.value.byteLength;
+      if (totalStreamed > streamLimit) throw new ResponseTooLargeError();
       const length = Math.min(first.value.byteLength, 256_000);
       sampleBytes += length;
       sample += decoder.decode(first.value.subarray(0, length), { stream: true });
@@ -518,6 +523,8 @@ async function streamResponse(input: {
       const next = await reader.read();
       if (next.done) break;
       bytesEmitted = true;
+      totalStreamed += next.value.byteLength;
+      if (totalStreamed > streamLimit) throw new ResponseTooLargeError();
       if (sampleBytes < 256_000) {
         const length = Math.min(next.value.byteLength, 256_000 - sampleBytes);
         sample += decoder.decode(next.value.subarray(0, length), { stream: true });
@@ -609,7 +616,10 @@ async function readBounded(
       const remaining = limit - size;
       if (value.byteLength > remaining) {
         if (!truncate) throw new ResponseTooLargeError();
-        if (remaining > 0) chunks.push(value.subarray(0, remaining));
+        if (remaining > 0) {
+          chunks.push(value.subarray(0, remaining));
+          size += remaining;
+        }
         break;
       }
       chunks.push(value);
@@ -740,7 +750,7 @@ function extractUsage(
 ): { inputTokens: number; outputTokens: number } {
   if (!contentType.includes("json")) return { inputTokens: 0, outputTokens: 0 };
   try {
-    const body = JSON.parse(buffer.toString("utf8")) as Record<string, unknown>;
+    const body = parseBoundedJSON(buffer.toString("utf8"), 1024 * 1024) as Record<string, unknown>;
     const usage = (body.usage ?? {}) as Record<string, unknown>;
     return {
       inputTokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
@@ -783,7 +793,26 @@ function waitForDrain(reply: FastifyReply, signal: AbortSignal): Promise<void> {
 }
 
 function sanitizePreview(value: string, runtime: RouterRuntime): string {
-  let safe = value.replace(/\b(?:Bearer\s+)?(?:sk-|key-)[A-Za-z0-9._-]{8,}\b/gi, "[REDACTED]");
+  const capped =
+    value.length > ERROR_PREVIEW_LIMIT ? `${value.slice(0, ERROR_PREVIEW_LIMIT)}…` : value;
+  let parsed: unknown;
+  try {
+    parsed = parseBoundedJSON(capped, ERROR_PREVIEW_LIMIT);
+  } catch {
+    parsed = capped;
+  }
+  const recursivelyRedacted = redactValue(parsed);
+  let safe =
+    typeof recursivelyRedacted === "string"
+      ? recursivelyRedacted
+      : (() => {
+          try {
+            return JSON.stringify(recursivelyRedacted);
+          } catch {
+            return String(recursivelyRedacted);
+          }
+        })();
+  safe = safe.replace(/\b(?:Bearer\s+)?(?:sk-|key-)[A-Za-z0-9._-]{8,}\b/gi, "[REDACTED]");
   const names = [
     ...runtime.config.models.map((model) => model.apiKeyEnv),
     runtime.config.server.authTokenEnv,
@@ -792,5 +821,5 @@ function sanitizePreview(value: string, runtime: RouterRuntime): string {
     const secret = runtime.env[name];
     if (secret) safe = safe.split(secret).join("[REDACTED]");
   }
-  return safe;
+  return safe.slice(0, ERROR_PREVIEW_LIMIT);
 }

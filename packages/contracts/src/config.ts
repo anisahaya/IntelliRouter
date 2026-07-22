@@ -10,12 +10,30 @@ export const capabilitySchema = z.object({
   maxContextTokens: z.number().int().positive(),
 });
 
+const loopbackHosts = new Set(["127.0.0.1", "::1", "localhost", "[::1]"]);
+
+const baseUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => {
+    const url = (() => {
+      try {
+        return new URL(value);
+      } catch {
+        return null;
+      }
+    })();
+    if (!url) return false;
+    if (url.protocol === "http:") return loopbackHosts.has(url.hostname);
+    return url.protocol === "https:";
+  }, "baseUrl must use https://, or http:// only with a loopback host");
+
 export const modelDefinitionSchema = z.object({
   id: z.string().min(1),
   enabled: z.boolean().default(true),
   provider: z.enum(["openai-compatible", "anthropic"]),
   upstreamModel: z.string().min(1),
-  baseUrl: z.string().url(),
+  baseUrl: baseUrlSchema,
   apiKeyEnv: z.string().min(1),
   cost: z
     .object({

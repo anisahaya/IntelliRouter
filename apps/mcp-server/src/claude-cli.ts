@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
+import { parseBoundedJSON } from "@model-router/telemetry";
 
 const execFileAsync = promisify(execFile);
 const defaultAliases = ["opus", "sonnet", "haiku"];
@@ -63,7 +63,7 @@ export async function discoverClaudeModels(
 
 export function parseClaudeAuth(output: string): { loggedIn: boolean; authMethod?: string } {
   try {
-    const value = JSON.parse(output) as Record<string, unknown>;
+    const value = parseBoundedJSON(output, 256 * 1024) as Record<string, unknown>;
     return {
       loggedIn: value.loggedIn === true,
       authMethod: typeof value.authMethod === "string" ? value.authMethod : undefined,
@@ -120,7 +120,10 @@ function displayName(value: string): string {
 
 async function readAvailableModels(path: string): Promise<string[] | undefined> {
   try {
-    const value = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    const value = parseBoundedJSON(await readFile(path, "utf8"), 256 * 1024) as Record<
+      string,
+      unknown
+    >;
     return Array.isArray(value.availableModels)
       ? value.availableModels.filter((item): item is string => typeof item === "string")
       : undefined;
@@ -131,8 +134,9 @@ async function readAvailableModels(path: string): Promise<string[] | undefined> 
 }
 
 function defaultSettingsPath(env: NodeJS.ProcessEnv): string {
-  const root = env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), ".claude");
-  return join(root, "settings.json");
+  if (env.CLAUDE_CONFIG_DIR) return join(env.CLAUDE_CONFIG_DIR, "settings.json");
+  if (env.HOME) return join(env.HOME, ".claude", "settings.json");
+  throw new Error("HOME or CLAUDE_CONFIG_DIR is required to locate Claude Code settings");
 }
 
 function discoveryEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

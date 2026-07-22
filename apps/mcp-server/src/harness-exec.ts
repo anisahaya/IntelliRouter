@@ -53,7 +53,7 @@ export async function executeHarnessTask(
   input: HarnessTaskInput,
   options: HarnessExecOptions = {},
 ): Promise<HarnessTaskResult> {
-  const env = options.env ?? process.env;
+  const env = options.state?.env ?? options.env ?? process.env;
   const stateOptions = { ...options.state, env };
   const record = await getRouteRecord(input.routeId, stateOptions);
   if (!record) throw new Error("Unknown or expired harness route");

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
+import { parseBoundedJSON } from "@model-router/telemetry";
 
 const execFileAsync = promisify(execFile);
 const allowedEfforts = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh", "max", "ultra"]);
@@ -100,7 +101,7 @@ export function parseVerboseModels(
       if (started && depth === 0) break;
     }
     try {
-      const model = JSON.parse(json) as RawOpenCodeModel;
+      const model = parseBoundedJSON(json, 256 * 1024) as RawOpenCodeModel;
       result.push({ qualifiedId, model });
     } catch {
       throw new Error(`OpenCode returned invalid metadata for ${qualifiedId}`);
@@ -168,7 +169,6 @@ function discoveryEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_CACHE_HOME",
-    "OPENCODE_CONFIG",
   ]) {
     if (source[key]) result[key] = source[key];
   }

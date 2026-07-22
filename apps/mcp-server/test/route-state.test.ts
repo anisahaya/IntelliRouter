@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AutoRouteDecision } from "@model-router/contracts";
@@ -70,7 +70,10 @@ function decision(routeId: string): AutoRouteDecision {
 describe("harness route state", () => {
   it("persists privacy-safe affinity and outcome updates as append-only records", async () => {
     const root = await mkdtemp(join(tmpdir(), "model-router-state-"));
-    const options = { path: join(root, "routes.jsonl") };
+    const options = {
+      path: join(root, "routes.jsonl"),
+      env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },
+    };
     const identity = routeIdentity({
       harness: "opencode",
       sessionId: "private-session",
@@ -98,10 +101,41 @@ describe("harness route state", () => {
   });
 
   it("returns no records for a missing store and rejects unknown updates", async () => {
-    const options = { path: join(tmpdir(), `missing-${newRouteId()}`, "routes.jsonl") };
+    const root = await mkdtemp(join(tmpdir(), "model-router-state-missing-"));
+    const options = {
+      path: join(root, "routes.jsonl"),
+      env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },
+    };
     expect(await getRouteRecord(newRouteId(), options)).toBeUndefined();
     await expect(updateRouteOutcome(newRouteId(), "success", {}, options)).rejects.toThrow(
       "Unknown harness route",
     );
+  });
+
+  it("compacts oversized append-only stores and preserves latest records", async () => {
+    const root = await mkdtemp(join(tmpdir(), "model-router-state-large-"));
+    const path = join(root, "routes.jsonl");
+    const record = decision(newRouteId());
+    const line =
+      JSON.stringify({
+        routeId: record.routeId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        harness: "opencode",
+        taskFingerprint: "x",
+        workspaceFingerprint: "y",
+        selectedCandidate: "m",
+        fallbackModel: "m",
+        profile: "balanced",
+        outcome: "planned",
+        featureSummary: record.taskProfile,
+        partialWriteDetected: false,
+      }) + "\n";
+    await writeFile(path, line.repeat(120_000), { mode: 0o600 });
+    const found = await getRouteRecord(record.routeId!, {
+      path,
+      env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },
+    });
+    expect(found?.routeId).toBe(record.routeId);
   });
 });

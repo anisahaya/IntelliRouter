@@ -71,6 +71,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     requestIdHeader: "x-request-id",
   });
   const token = config.server.authTokenEnv ? env[config.server.authTokenEnv] : undefined;
+  if (config.server.authTokenEnv && !token?.trim()) {
+    throw new Error(
+      `Authentication token environment variable ${config.server.authTokenEnv} is configured but unresolved; refusing to start an unauthenticated server`,
+    );
+  }
   installAuth(app, token);
   installRequestContext(app);
   installErrors(app);

@@ -3,6 +3,7 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, extname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { RepoSignals } from "@model-router/contracts";
+import { parseBoundedJSON } from "@model-router/telemetry";
 
 const execFileAsync = promisify(execFile);
 const ignoredDirectories = new Set([".git", "node_modules", "dist", "coverage"]);
@@ -150,8 +151,8 @@ export async function collectRepoSignals(
 async function collectPackageDependencies(path: string, target: Set<string>): Promise<void> {
   try {
     const source = await readFile(path, "utf8");
-    if (source.length > 512 * 1024) return;
-    const parsed = JSON.parse(source) as Record<string, unknown>;
+    if (source.length > 256 * 1024) return;
+    const parsed = parseBoundedJSON(source, 256 * 1024) as Record<string, unknown>;
     for (const field of ["dependencies", "devDependencies", "peerDependencies"]) {
       const values = parsed[field];
       if (!values || typeof values !== "object" || Array.isArray(values)) continue;

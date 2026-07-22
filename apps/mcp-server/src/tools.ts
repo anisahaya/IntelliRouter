@@ -10,17 +10,31 @@ import { z } from "zod/v4";
 import { type AutoRouterOptions, autoRoute } from "./auto-router.js";
 import type { ProxyClient } from "./client.js";
 import { type CodexExecOptions, executeCodexTask } from "./codex-exec.js";
+
+const noNullBytes = (value: string) => !value.includes("\0");
+export const boundedString = (min: number, max: number) =>
+  z.string().min(min).max(max).refine(noNullBytes, { message: "NUL bytes are not permitted" });
+export const boundedStringOptional = (min: number, max: number) =>
+  z
+    .string()
+    .min(min)
+    .max(max)
+    .optional()
+    .refine((value) => value === undefined || noNullBytes(value), {
+      message: "NUL bytes are not permitted",
+    });
+
 import { executeHarnessTask, type HarnessExecOptions } from "./harness-exec.js";
 import { type HarnessRouterOptions, routeHarnessTask } from "./harness-router.js";
 import { getRouteRecord, updateRouteOutcome } from "./route-state.js";
 
 export const routeTaskInput = {
-  task: z.string().min(1).max(32_000),
-  profile: z.string().min(1).max(64).default("balanced"),
+  task: boundedString(1, 32_000),
+  profile: boundedString(1, 64).default("balanced"),
   protocol: z
     .enum(["openai-chat", "openai-responses", "anthropic-messages"])
     .default("openai-chat"),
-  session: z.string().max(512).optional(),
+  session: boundedStringOptional(1, 512),
   toolsRequired: z.boolean().default(false),
   jsonRequired: z.boolean().default(false),
   visionRequired: z.boolean().default(false),
@@ -58,12 +72,12 @@ export const routeTaskOutput = {
 export const genericObjectOutput = { result: z.record(z.string(), z.unknown()) };
 
 export const autoRouteInput = {
-  objective: z.string().min(1).max(32_000),
-  conversationSummary: z.string().max(16_000).optional(),
-  workspaceRoot: z.string().min(1).max(4_096),
+  objective: boundedString(1, 32_000),
+  conversationSummary: boundedStringOptional(1, 16_000),
+  workspaceRoot: boundedString(1, 4_096),
   registeredAgents: z.array(registeredAgentSchema).max(32).default([]),
   profile: autoRouteProfileSchema.default("balanced"),
-  currentModel: z.string().min(1).max(128),
+  currentModel: boundedString(1, 128),
   requirements: autoRouteRequirementsSchema.default({
     tools: true,
     vision: false,
@@ -74,29 +88,29 @@ export const autoRouteInput = {
 };
 
 export const delegateCodexTaskInput = {
-  model: z.string().min(1).max(128),
+  model: boundedString(1, 128),
   reasoningEffort: reasoningEffortSchema,
-  objective: z.string().min(1).max(32_000),
-  conversationSummary: z.string().max(16_000).optional(),
-  acceptanceChecks: z.array(z.string().max(1_000)).max(32).default([]),
+  objective: boundedString(1, 32_000),
+  conversationSummary: boundedStringOptional(1, 16_000),
+  acceptanceChecks: z.array(boundedString(1, 1_000)).max(32).default([]),
   searchRequired: z.boolean().default(false),
   visionRequired: z.boolean().default(false),
-  imagePaths: z.array(z.string().min(1).max(4_096)).max(8).default([]),
+  imagePaths: z.array(boundedString(1, 4_096)).max(8).default([]),
   repoSignals: repoSignalsSchema,
-  workspaceRoot: z.string().min(1).max(4_096),
+  workspaceRoot: boundedString(1, 4_096),
   permission: z.enum(["read-only", "workspace-write"]).default("read-only"),
   timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
 };
 
 export const routeHarnessTaskInput = {
   harness: harnessIdSchema,
-  objective: z.string().min(1).max(32_000),
-  conversationSummary: z.string().max(16_000).optional(),
-  workspaceRoot: z.string().min(1).max(4_096),
+  objective: boundedString(1, 32_000),
+  conversationSummary: boundedStringOptional(1, 16_000),
+  workspaceRoot: boundedString(1, 4_096),
   registeredAgents: z.array(registeredAgentSchema).max(32).default([]),
   profile: autoRouteProfileSchema.default("balanced"),
-  currentModel: z.string().min(1).max(256).optional(),
-  sessionId: z.string().min(1).max(512).optional(),
+  currentModel: boundedStringOptional(1, 256),
+  sessionId: boundedStringOptional(1, 512),
   forceReroute: z.boolean().default(false),
   requirements: autoRouteRequirementsSchema.default({
     tools: true,
@@ -110,18 +124,23 @@ export const routeHarnessTaskInput = {
 export const delegateHarnessTaskInput = {
   routeId: z.string().uuid(),
   harness: harnessIdSchema,
-  model: z.string().min(1).max(256),
+  model: boundedString(1, 256),
   reasoningEffort: reasoningEffortSchema,
-  objective: z.string().min(1).max(32_000),
-  conversationSummary: z.string().max(16_000).optional(),
-  acceptanceChecks: z.array(z.string().max(1_000)).max(32).default([]),
+  objective: boundedString(1, 32_000),
+  conversationSummary: boundedStringOptional(1, 16_000),
+  acceptanceChecks: z.array(boundedString(1, 1_000)).max(32).default([]),
   searchRequired: z.boolean().default(false),
   visionRequired: z.boolean().default(false),
-  imagePaths: z.array(z.string().min(1).max(4_096)).max(8).default([]),
+  imagePaths: z.array(boundedString(1, 4_096)).max(8).default([]),
   repoSignals: repoSignalsSchema,
-  workspaceRoot: z.string().min(1).max(4_096),
+  workspaceRoot: boundedString(1, 4_096),
   permission: z.enum(["read-only", "workspace-write"]).default("read-only"),
   timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
+};
+
+export const readonlyHarnessTaskInput = {
+  ...delegateHarnessTaskInput,
+  permission: z.literal("read-only").default("read-only"),
 };
 
 export function createToolHandlers(
