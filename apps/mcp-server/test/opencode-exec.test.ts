@@ -65,7 +65,10 @@ describe("OpenCode native execution", () => {
     expect(extractOpenCodeOutput('{"type":"text","part":{"type":"text","text":"a"}}\nnoise')).toBe(
       "a",
     );
-    const state = { path: join(root, "success-routes.jsonl"), env: { ...process.env, MODEL_ROUTER_DATA_DIR: root } };
+    const state = {
+      path: join(root, "success-routes.jsonl"),
+      env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },
+    };
     const routeId = await plannedRoute(state);
     const result = await executeHarnessTask(
       {
@@ -93,7 +96,10 @@ describe("OpenCode native execution", () => {
   });
 
   it("detects partial writes after an unusable write-capable child result", async () => {
-    const state = { path: join(root, "failure-routes.jsonl"), env: { ...process.env, MODEL_ROUTER_DATA_DIR: root } };
+    const state = {
+      path: join(root, "failure-routes.jsonl"),
+      env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },
+    };
     const routeId = await plannedRoute(state);
     const repoRunner: RepoCommandRunner = {
       async execFile(_file, args) {
@@ -134,7 +140,10 @@ describe("OpenCode native execution", () => {
   });
 
   it("records adapter launch failures and permits fallback when no files changed", async () => {
-    const state = { path: join(root, "launch-failure-routes.jsonl"), env: { ...process.env, MODEL_ROUTER_DATA_DIR: root } };
+    const state = {
+      path: join(root, "launch-failure-routes.jsonl"),
+      env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },
+    };
     const routeId = await plannedRoute(state);
     const result = await executeHarnessTask(
       {

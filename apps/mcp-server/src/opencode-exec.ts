@@ -225,10 +225,12 @@ function runChild(
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
-      if (stdout.length < MAX_CAPTURE_CHARS) stdout += chunk.slice(0, MAX_CAPTURE_CHARS - stdout.length);
+      if (stdout.length < MAX_CAPTURE_CHARS)
+        stdout += chunk.slice(0, MAX_CAPTURE_CHARS - stdout.length);
     });
     child.stderr.on("data", (chunk: string) => {
-      if (stderr.length < MAX_CAPTURE_CHARS) stderr += chunk.slice(0, MAX_CAPTURE_CHARS - stderr.length);
+      if (stderr.length < MAX_CAPTURE_CHARS)
+        stderr += chunk.slice(0, MAX_CAPTURE_CHARS - stderr.length);
     });
     child.once("error", (error) => {
       if (settled) return;

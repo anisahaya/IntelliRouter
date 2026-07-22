@@ -13,8 +13,13 @@ export function redactHeaders(headers: Record<string, unknown>): Record<string, 
 }
 
 export function redactTokenText(value: string): string {
-  return TOKEN_TEXT_PATTERNS.reduce((text, pattern) => text.replace(pattern, (match) =>
-    /^Bearer\s/i.test(match) ? "Bearer [REDACTED]" : "[REDACTED]"), value);
+  return TOKEN_TEXT_PATTERNS.reduce(
+    (text, pattern) =>
+      text.replace(pattern, (match) =>
+        /^Bearer\s/i.test(match) ? "Bearer [REDACTED]" : "[REDACTED]",
+      ),
+    value,
+  );
 }
 
 export class BoundedParseError extends Error {

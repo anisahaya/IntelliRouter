@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { realpathSync } from "node:fs";
 import type {
   AutoRouteDecision,
   AutoRouteProfile,

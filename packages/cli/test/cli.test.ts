@@ -72,7 +72,7 @@ describe("CLI clients", () => {
     const databasePath = join(directory, "router.db");
     await writeFile(
       path,
-      `server:\n  databasePath: ${databasePath}\nmodels:\n  - id: example\n    provider: openai-compatible\n    upstreamModel: provider/model\n    baseUrl: https://api.example/v1\n    apiKeyEnv: DOCTOR_MISSING_KEY\n    capabilities:\n      protocols: [openai-chat]\n      maxContextTokens: 1000\nrouting:\n  defaultProfile: balanced\n  profiles:\n    balanced:\n      weights: { quality: 0.5, cost: 0.3, latency: 0.2 }\n`,
+      `server:\n  databasePath: ${databasePath}\nmodels:\n  - id: example\n    provider: openai-compatible\n    upstreamModel: provider/model\n    baseUrl: http://127.0.0.1/v1\n    apiKeyEnv: DOCTOR_MISSING_KEY\n    capabilities:\n      protocols: [openai-chat]\n      maxContextTokens: 1000\nrouting:\n  defaultProfile: balanced\n  profiles:\n    balanced:\n      weights: { quality: 0.5, cost: 0.3, latency: 0.2 }\n`,
     );
     vi.stubGlobal(
       "fetch",
@@ -87,7 +87,7 @@ describe("CLI clients", () => {
     const result = await doctor(path, true);
     expect(result).toMatchObject({ config: "ok", database: "ok", models: 1 });
     expect(result.missingEnvironment).toContain("DOCTOR_MISSING_KEY");
-    expect(result.placeholders).toHaveLength(2);
+    expect(result.placeholders).toHaveLength(1);
     expect(result.probes).toEqual([{ model: "example", reachable: false }]);
     process.env.DOCTOR_MISSING_KEY = "probe-key";
     expect((await doctor(path, true)).probes).toEqual([

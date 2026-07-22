@@ -1,6 +1,6 @@
+import { lookup } from "node:dns/promises";
 import type { ModelDefinition, NormalizedRequest, Protocol } from "@model-router/contracts";
 import type { ErrorClass } from "@model-router/router-core";
-import { lookup } from "node:dns/promises";
 
 export interface PreparedProviderRequest {
   url: string;
@@ -73,8 +73,11 @@ export async function assertSafeEgress(url: string): Promise<void> {
     // Resolve all answers at request time; DNS can still rebind after this check,
     // so deployments should additionally enforce outbound network policy.
     let addresses: Array<{ address: string; family: number }>;
-    try { addresses = await lookup(hostname, { all: true, verbatim: true }); }
-    catch { throw new UpstreamError("upstream host could not be resolved", 400); }
+    try {
+      addresses = await lookup(hostname, { all: true, verbatim: true });
+    } catch {
+      throw new UpstreamError("upstream host could not be resolved", 400);
+    }
     if (!addresses.length || addresses.some((entry) => !isGlobalAddress(entry.address))) {
       throw new UpstreamError("upstream host resolves to a private or non-global address", 400);
     }
@@ -83,7 +86,17 @@ export async function assertSafeEgress(url: string): Promise<void> {
 
 function isPrivateIpv6(host: string): boolean {
   const value = host.toLowerCase();
-  return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") || value.startsWith("feb") || value.startsWith("::ffff:");
+  return (
+    value === "::1" ||
+    value === "::" ||
+    value.startsWith("fc") ||
+    value.startsWith("fd") ||
+    value.startsWith("fe8") ||
+    value.startsWith("fe9") ||
+    value.startsWith("fea") ||
+    value.startsWith("feb") ||
+    value.startsWith("::ffff:")
+  );
 }
 
 function isGlobalAddress(address: string): boolean {

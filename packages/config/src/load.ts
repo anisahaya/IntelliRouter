@@ -34,15 +34,23 @@ export function assertWithinDataRoot(
   );
 }
 
-export async function assertPathConfinement(label: string, path: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+export async function assertPathConfinement(
+  label: string,
+  path: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
   assertWithinDataRoot(label, path, env);
   const root = resolve(dataRoot(env));
   let cursor = resolve(path);
   while (true) {
     try {
-      const [realRoot, realCursor] = await Promise.all([import("node:fs/promises").then((fs) => fs.realpath(root)), import("node:fs/promises").then((fs) => fs.realpath(cursor))]);
+      const [realRoot, realCursor] = await Promise.all([
+        import("node:fs/promises").then((fs) => fs.realpath(root)),
+        import("node:fs/promises").then((fs) => fs.realpath(cursor)),
+      ]);
       const rel = relative(realRoot, realCursor);
-      if (rel.startsWith("..") || isAbsolute(rel)) throw new Error(`${label} resolves outside the model router data directory`);
+      if (rel.startsWith("..") || isAbsolute(rel))
+        throw new Error(`${label} resolves outside the model router data directory`);
       return;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {

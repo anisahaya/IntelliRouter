@@ -49,11 +49,17 @@ describe("auto routing over MCP", () => {
       harnessRouter: {
         codex: { executable: fakeCodex },
         trustedRoot: fixtureRoot,
-        state: { path: join(fixtureRoot, "harness-routes.jsonl"), env: { ...process.env, MODEL_ROUTER_DATA_DIR: fixtureRoot } },
+        state: {
+          path: join(fixtureRoot, "harness-routes.jsonl"),
+          env: { ...process.env, MODEL_ROUTER_DATA_DIR: fixtureRoot },
+        },
       },
       harnessExec: {
         codex: { executable: fakeCodex, trustedRoot: fixtureRoot },
-        state: { path: join(fixtureRoot, "harness-routes.jsonl"), env: { ...process.env, MODEL_ROUTER_DATA_DIR: fixtureRoot } },
+        state: {
+          path: join(fixtureRoot, "harness-routes.jsonl"),
+          env: { ...process.env, MODEL_ROUTER_DATA_DIR: fixtureRoot },
+        },
       },
     });
     const client = new Client({ name: "auto-mcp-test", version: "0.1.0" });
