@@ -54,7 +54,7 @@ describe("Claude Code native execution", () => {
       output: "ok",
       sessionId: "s",
     });
-    const state = { path: join(root, "routes.jsonl") };
+    const state = { path: join(root, "routes.jsonl"), env: { ...process.env, MODEL_ROUTER_DATA_DIR: root } };
     const routeId = await plannedRoute(state);
     const result = await executeHarnessTask(
       {
@@ -83,7 +83,7 @@ describe("Claude Code native execution", () => {
 
   it("preserves plain output and reports child launch failures", async () => {
     expect(extractClaudeOutput("plain output")).toEqual({ output: "plain output" });
-    const state = { path: join(root, "failed-routes.jsonl") };
+    const state = { path: join(root, "failed-routes.jsonl"), env: { ...process.env, MODEL_ROUTER_DATA_DIR: root } };
     const routeId = await plannedRoute(state);
     await expect(
       executeHarnessTask(

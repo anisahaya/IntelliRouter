@@ -70,7 +70,7 @@ function decision(routeId: string): AutoRouteDecision {
 describe("harness route state", () => {
   it("persists privacy-safe affinity and outcome updates as append-only records", async () => {
     const root = await mkdtemp(join(tmpdir(), "model-router-state-"));
-    const options = { path: join(root, "routes.jsonl") };
+    const options = { path: join(root, "routes.jsonl"), env: { ...process.env, MODEL_ROUTER_DATA_DIR: root } };
     const identity = routeIdentity({
       harness: "opencode",
       sessionId: "private-session",
@@ -98,7 +98,8 @@ describe("harness route state", () => {
   });
 
   it("returns no records for a missing store and rejects unknown updates", async () => {
-    const options = { path: join(tmpdir(), `missing-${newRouteId()}`, "routes.jsonl") };
+    const root = await mkdtemp(join(tmpdir(), "model-router-state-missing-"));
+    const options = { path: join(root, "routes.jsonl"), env: { ...process.env, MODEL_ROUTER_DATA_DIR: root } };
     expect(await getRouteRecord(newRouteId(), options)).toBeUndefined();
     await expect(updateRouteOutcome(newRouteId(), "success", {}, options)).rejects.toThrow(
       "Unknown harness route",

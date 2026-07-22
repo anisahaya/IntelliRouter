@@ -67,6 +67,7 @@ describe("CLI clients", () => {
 
   it("diagnoses configuration, placeholders, missing keys, and optional probes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "router-doctor-"));
+    process.env.MODEL_ROUTER_DATA_DIR = directory;
     const path = join(directory, "router.yaml");
     const databasePath = join(directory, "router.db");
     await writeFile(
