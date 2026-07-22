@@ -1,5 +1,5 @@
 import { UpstreamError } from "@model-router/providers";
-import { redactValue, TOKEN_LITERAL } from "@model-router/telemetry";
+import { redactTokenText, redactValue } from "@model-router/telemetry";
 import type { FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 
@@ -63,14 +63,12 @@ function safeUpstreamError(body?: string): unknown {
     const parsed = redactValue(JSON.parse(truncated));
     return redactTokenLiterals(parsed);
   } catch {
-    return sanitizeClientMessage(
-      String(redactValue(truncated)).replace(TOKEN_LITERAL, "[REDACTED]"),
-    );
+    return sanitizeClientMessage(String(redactValue(truncated)));
   }
 }
 
 function redactTokenLiterals(value: unknown): unknown {
-  if (typeof value === "string") return TOKEN_LITERAL.test(value) ? "[REDACTED]" : value;
+  if (typeof value === "string") return redactTokenText(value);
   if (Array.isArray(value)) return value.map(redactTokenLiterals);
   if (value && typeof value === "object") {
     return Object.fromEntries(
@@ -82,6 +80,7 @@ function redactTokenLiterals(value: unknown): unknown {
 
 export function sanitizeClientMessage(message: string): string {
   let safe = message;
+  safe = redactTokenText(safe);
   if (HOME_PREFIX) safe = safe.split(HOME_PREFIX).join("~");
   safe = safe.replace(/\/[^\s"'<>]+\/[^\s"'<>]+/g, "<path>");
   return safe.slice(0, UPSTREAM_PREVIEW_LIMIT);

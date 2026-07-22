@@ -27,8 +27,8 @@ export class AnthropicAdapter implements ProviderAdapter {
     };
   }
 
-  send(prepared: PreparedProviderRequest, signal?: AbortSignal): Promise<Response> {
-    assertSafeEgress(prepared.url);
+  async send(prepared: PreparedProviderRequest, signal?: AbortSignal): Promise<Response> {
+    await assertSafeEgress(prepared.url);
     return fetch(prepared.url, { ...prepared.init, signal });
   }
 

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { realpathSync } from "node:fs";
 import type {
   AutoRouteDecision,
   AutoRouteProfile,
@@ -223,7 +223,7 @@ async function readRecords(options: RouteStateOptions): Promise<HarnessRouteReco
 const STATE_MAX_RECORDS = 5_000;
 const STATE_MAX_AGE_DAYS = 30;
 const MAX_STATE_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_RECORD_BYTES = 256 * 1024;
+const MAX_RECORD_BYTES = 64 * 1024;
 const SECRET_PATTERN = /\b(?:sk|ghp|github_pat|xox[abprs]|key-|bearer)[-._~+\\/A-Za-z0-9]{8,}\b/gi;
 const REDACTION_PAIR_PATTERN =
   /(["'](?:token|secret|password|credential|api[_-]?key|authorization)["']\s*:\s*["'])[^"']+(["'])/gi;
@@ -291,19 +291,32 @@ function statePath(options: RouteStateOptions): string {
     const home = env.HOME ?? "";
     const dataRoot =
       env.MODEL_ROUTER_DATA_DIR ?? (home ? join(home, ".model-router") : join("/.model-router"));
-    const tmp = tmpdir();
-    if (
-      resolved === dataRoot ||
-      resolved.startsWith(`${dataRoot}/`) ||
-      resolved.startsWith(`${dataRoot}\\`) ||
-      resolved === tmp ||
-      resolved.startsWith(`${tmp}/`) ||
-      resolved.startsWith(`${tmp}${process.platform === "win32" ? "\\" : "/"}`)
-    ) {
-      return resolved;
+    const rel = relative(resolve(dataRoot), resolved);
+    if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+      // Existing symlinks must not escape the configured data root.
+      try {
+        const rootReal = realpathSync(resolve(dataRoot));
+        let probe = resolved;
+        while (true) {
+          try {
+            probe = realpathSync(probe);
+            break;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            const parent = dirname(probe);
+            if (parent === probe) throw error;
+            probe = parent;
+          }
+        }
+        const pathReal = probe;
+        const realRel = relative(rootReal, pathReal);
+        if (realRel === "" || (!realRel.startsWith("..") && !isAbsolute(realRel))) return resolved;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return resolved;
+      }
     }
     throw new Error(
-      `MODEL_ROUTER_STATE_PATH "${resolved}" is outside the model router data directory (${dataRoot}) or the system temp directory (${tmp})`,
+      `MODEL_ROUTER_STATE_PATH "${resolved}" is outside the model router data directory (${dataRoot})`,
     );
   }
   const home = env.HOME;

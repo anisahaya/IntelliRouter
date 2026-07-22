@@ -1,10 +1,20 @@
 const sensitive = /(?:token|secret|password|key|credential|authorization|cookie)/i;
 export const TOKEN_LITERAL =
   /\b(?:sk|ghp|github_pat|xox[abprs]|key-|bearer)[-._~+/A-Za-z0-9]{8,}\b/i;
+const TOKEN_TEXT_PATTERNS = [
+  /\bBearer\s+[^\s,;]+/gi,
+  /\b(?:sk|ghp|github_pat|xox[abprs]|key-)[-._~+/A-Za-z0-9]{8,}\b/gi,
+  /\b(?:token|api[-_]?key|secret|authorization)\s*[:=]\s*[^\s,;]+/gi,
+];
 const MAX_DEPTH = 32;
 
 export function redactHeaders(headers: Record<string, unknown>): Record<string, unknown> {
   return redactValue(headers) as Record<string, unknown>;
+}
+
+export function redactTokenText(value: string): string {
+  return TOKEN_TEXT_PATTERNS.reduce((text, pattern) => text.replace(pattern, (match) =>
+    /^Bearer\s/i.test(match) ? "Bearer [REDACTED]" : "[REDACTED]"), value);
 }
 
 export class BoundedParseError extends Error {
@@ -61,14 +71,13 @@ export function redactValue(value: unknown, depth = 0): unknown {
     );
   }
   if (typeof value === "string") {
-    if (TOKEN_LITERAL.test(value)) return "[REDACTED]";
     try {
       const url = new URL(value);
       for (const key of [...url.searchParams.keys()])
         if (sensitive.test(key)) url.searchParams.set(key, "[REDACTED]");
       return url.toString();
     } catch {
-      return value;
+      return redactTokenText(value);
     }
   }
   return value;

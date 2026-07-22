@@ -1,5 +1,6 @@
 import type { ModelDefinition, NormalizedRequest, Protocol } from "@model-router/contracts";
 import type { ErrorClass } from "@model-router/router-core";
+import { lookup } from "node:dns/promises";
 
 export interface PreparedProviderRequest {
   url: string;
@@ -49,7 +50,7 @@ function isPrivateRfc1918(hostname: string): boolean {
   );
 }
 
-export function assertSafeEgress(url: string): void {
+export async function assertSafeEgress(url: string): Promise<void> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -64,8 +65,30 @@ export function assertSafeEgress(url: string): void {
   if (parsed.protocol === "http:" && !loopback) {
     throw new UpstreamError("http:// upstream is only permitted on loopback", 400);
   }
-  if (isLinkLocal(hostname) || isPrivateRfc1918(hostname)) {
+  if (isLinkLocal(hostname) || isPrivateRfc1918(hostname) || isPrivateIpv6(hostname)) {
     if (loopback) return;
     throw new UpstreamError("upstream host is in a link-local or private range", 400);
   }
+  if (!loopback) {
+    // Resolve all answers at request time; DNS can still rebind after this check,
+    // so deployments should additionally enforce outbound network policy.
+    let addresses: Array<{ address: string; family: number }>;
+    try { addresses = await lookup(hostname, { all: true, verbatim: true }); }
+    catch { throw new UpstreamError("upstream host could not be resolved", 400); }
+    if (!addresses.length || addresses.some((entry) => !isGlobalAddress(entry.address))) {
+      throw new UpstreamError("upstream host resolves to a private or non-global address", 400);
+    }
+  }
+}
+
+function isPrivateIpv6(host: string): boolean {
+  const value = host.toLowerCase();
+  return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") || value.startsWith("feb") || value.startsWith("::ffff:");
+}
+
+function isGlobalAddress(address: string): boolean {
+  const host = address.replace(/^\[|\]$/g, "").toLowerCase();
+  if (isPrivateRfc1918(host) || isLinkLocal(host) || isPrivateIpv6(host)) return false;
+  if (/^127\./.test(host) || host === "0.0.0.0") return false;
+  return true;
 }

@@ -2,8 +2,11 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 
 export function installAuth(app: FastifyInstance, expectedToken?: string): void {
-  const normalized = expectedToken?.trim();
-  if (!normalized) return;
+  const normalized = expectedToken === undefined ? undefined : expectedToken.trim();
+  if (expectedToken !== undefined && !normalized) {
+    throw new Error("Authentication token must not be empty");
+  }
+  if (normalized === undefined) return;
   const right = Buffer.from(normalized);
   app.addHook("onRequest", async (request, reply) => {
     const value = request.headers.authorization;
