@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { collectPostmanOffenders } from "./postman-policy.mjs";
 import { startHarness } from "./test-harness.mjs";
 
 await assertPostmanCollectionLoopback();
@@ -48,25 +49,12 @@ async function assertPostmanCollectionLoopback() {
   const collectionPath = join(process.cwd(), "postman", "model-router.postman_collection.json");
   const raw = await readFile(collectionPath, "utf8");
   const collection = JSON.parse(raw);
-  const offenders = [];
-  collect(collection.item ?? [], offenders);
+  const offenders = collectPostmanOffenders(collection);
   if (offenders.length > 0) {
     console.error(
       `postman-smoke: refusing to run. ${offenders.length} request(s) target a non-loopback host:`,
     );
     for (const { name, url } of offenders) console.error(`  - ${name}: ${String(url)}`);
     process.exit(1);
-  }
-}
-
-function collect(items, offenders) {
-  for (const item of items) {
-    if (Array.isArray(item.item)) {
-      collect(item.item, offenders);
-      continue;
-    }
-    const url = item?.request?.url;
-    const rawUrl = typeof url === "object" ? url?.raw : url;
-    if (!isLoopbackUrl(rawUrl)) offenders.push({ name: item?.name, url: rawUrl });
   }
 }

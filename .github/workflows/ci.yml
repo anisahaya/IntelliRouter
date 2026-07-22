@@ -13,13 +13,6 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --prod --audit-level=high
+      - run: pnpm license:policy
+      - run: pnpm audit:policy
       - run: pnpm run ci
-  dependency-review:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
-        with:
-          fail-on-severity: moderate
-          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0

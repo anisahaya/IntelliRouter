@@ -29,6 +29,8 @@
     "smoke": "node scripts/smoke.mjs",
     "mcp:smoke": "node scripts/mcp-smoke.mjs",
     "postman": "node scripts/postman-smoke.mjs",
+    "audit:policy": "pnpm audit --prod --json | node scripts/check-audit-policy.mjs",
+    "license:policy": "pnpm licenses list --prod --json | node scripts/check-license-policy.mjs",
     "validate:skill": "node scripts/validate.mjs skill",
     "validate:plugin": "node scripts/validate.mjs plugin",
     "validate:product": "node scripts/validate-product.mjs",

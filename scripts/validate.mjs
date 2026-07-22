@@ -1,9 +1,19 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, realpathSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
 
-const SAFE_TMP = realpathSync(tmpdir());
+const FIXED_TMP =
+  process.platform === "win32"
+    ? resolve(process.env.SystemDrive || "C:", "\\Windows\\Temp")
+    : "/tmp";
+let SAFE_TMP;
+try {
+  SAFE_TMP = realpathSync(FIXED_TMP);
+} catch {
+  mkdirSync(FIXED_TMP, { recursive: true });
+  SAFE_TMP = realpathSync(FIXED_TMP);
+}
 const HOME = process.env.HOME && process.env.HOME.length > 0 ? process.env.HOME : homedir();
 const CODEX_HOME =
   process.env.CODEX_HOME && process.env.CODEX_HOME.length > 0
@@ -11,16 +21,20 @@ const CODEX_HOME =
     : join(HOME, ".codex");
 
 function safeAncestor(candidate) {
-  if (!candidate || candidate.length === 0) return SAFE_TMP;
+  if (process.platform === "win32" || !candidate) return SAFE_TMP;
   try {
-    const resolved = realpathSync(resolve(SAFE_TMP, candidate));
-    if (
-      resolved === SAFE_TMP ||
-      resolved.startsWith(`${SAFE_TMP}${process.platform === "win32" ? "\\" : "/"}`)
-    )
-      return resolved;
+    let path = resolve(candidate);
+    while (path !== dirname(path)) {
+      try {
+        const resolved = realpathSync(path);
+        if (resolved === SAFE_TMP || resolved.startsWith(`${SAFE_TMP}${sep}`)) return resolved;
+        return SAFE_TMP;
+      } catch {
+        path = dirname(path);
+      }
+    }
   } catch {
-    return SAFE_TMP;
+    // fall through to fixed anchor
   }
   return SAFE_TMP;
 }
@@ -58,10 +72,10 @@ if (!args) {
   process.exit(2);
 }
 
-const child = spawn("uv", ["run", ...args], {
+const child = spawn(process.platform === "win32" ? "uv.exe" : "uv", ["run", ...args], {
   stdio: "inherit",
   env: { ...process.env, UV_CACHE_DIR },
-  shell: process.platform === "win32",
+  shell: false,
 });
 child.once("error", (error) => {
   console.error(`validate: failed to spawn uv: ${error.message}`);
