@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import type {
   AutoRouteDecision,
   AutoRouteProfile,
@@ -100,10 +101,11 @@ export async function updateRouteOutcome(
     ...current,
     updatedAt: new Date().toISOString(),
     outcome,
-    rerouteReason: input.rerouteReason?.slice(0, 512),
+    rerouteReason: sanitizeReason(input.rerouteReason),
     partialWriteDetected: input.partialWriteDetected ?? current.partialWriteDetected,
   };
   await appendRecord(updated, options);
+  await compactStateIfLarge(options);
   return updated;
 }
 
@@ -179,16 +181,95 @@ function featureSummary(task: AutoTaskProfile): HarnessRouteRecord["featureSumma
 async function appendRecord(record: HarnessRouteRecord, options: RouteStateOptions): Promise<void> {
   const path = statePath(options);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await appendFile(path, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
+  const line = `${JSON.stringify(record)}\n`;
+  const handle = await open(path, "a", 0o600);
+  try {
+    await handle.writeFile(line);
+  } finally {
+    await handle.close();
+  }
 }
 
 async function readRecords(options: RouteStateOptions): Promise<HarnessRouteRecord[]> {
+  const path = statePath(options);
+  const info = await stat(path).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!info) return [];
+  if (info.size > MAX_STATE_FILE_BYTES) {
+    await compactStateFile(options);
+  }
   try {
-    const source = await readFile(statePath(options), "utf8");
+    const source = await readFile(path, "utf8");
     return source
       .split("\n")
       .filter(Boolean)
       .flatMap((line) => {
+        if (line.length > MAX_RECORD_BYTES) return [];
+        try {
+          return [JSON.parse(line) as HarnessRouteRecord];
+        } catch {
+          return [];
+        }
+      });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+const STATE_MAX_RECORDS = 5_000;
+const STATE_MAX_AGE_DAYS = 30;
+const MAX_STATE_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_RECORD_BYTES = 256 * 1024;
+const SECRET_PATTERN = /\b(?:sk|ghp|github_pat|xox[abprs]|key-|bearer)[-._~+\\/A-Za-z0-9]{8,}\b/gi;
+const REDACTION_PAIR_PATTERN =
+  /(["'](?:token|secret|password|credential|api[_-]?key|authorization)["']\s*:\s*["'])[^"']+(["'])/gi;
+
+function sanitizeReason(value?: string): string | undefined {
+  if (!value) return undefined;
+  let safe = value
+    .slice(0, 512)
+    .replace(SECRET_PATTERN, "[REDACTED]")
+    .replace(REDACTION_PAIR_PATTERN, "$1[REDACTED]$2");
+  if (process.env.HOME && process.env.HOME.length > 2)
+    safe = safe.split(process.env.HOME).join("~");
+  return safe;
+}
+
+async function compactStateIfLarge(options: RouteStateOptions): Promise<void> {
+  const path = statePath(options);
+  const info = await stat(path).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (info && info.size > MAX_STATE_FILE_BYTES) await compactStateFile(options);
+}
+
+async function compactStateFile(options: RouteStateOptions): Promise<void> {
+  const path = statePath(options);
+  const records = await readRecordsRaw(path);
+  const latest = new Map<string, HarnessRouteRecord>();
+  for (const record of records) latest.set(record.routeId, record);
+  const cutoff = Date.now() - STATE_MAX_AGE_DAYS * 24 * 60 * 60 * 1_000;
+  const kept = [...latest.values()]
+    .filter((record) => Date.parse(record.updatedAt) >= cutoff)
+    .slice(-STATE_MAX_RECORDS);
+  const serialized = kept.map((record) => JSON.stringify(record)).join("\n");
+  const temp = `${path}.tmp`;
+  await writeFile(temp, `${serialized}\n`, { encoding: "utf8", mode: 0o600 });
+  await import("node:fs/promises").then((fs) => fs.rename(temp, path));
+}
+
+async function readRecordsRaw(path: string): Promise<HarnessRouteRecord[]> {
+  try {
+    const source = await readFile(path, "utf8");
+    return source
+      .split("\n")
+      .filter(Boolean)
+      .flatMap((line) => {
+        if (line.length > MAX_RECORD_BYTES) return [];
         try {
           return [JSON.parse(line) as HarnessRouteRecord];
         } catch {
@@ -202,9 +283,28 @@ async function readRecords(options: RouteStateOptions): Promise<HarnessRouteReco
 }
 
 function statePath(options: RouteStateOptions): string {
-  if (options.path) return options.path;
   const env = options.env ?? process.env;
-  if (env.MODEL_ROUTER_STATE_PATH) return env.MODEL_ROUTER_STATE_PATH;
+  const candidate = options.path ?? env.MODEL_ROUTER_STATE_PATH;
+  if (candidate) {
+    const resolved = resolve(candidate);
+    const home = env.HOME ?? "";
+    const dataRoot =
+      env.MODEL_ROUTER_DATA_DIR ?? (home ? join(home, ".model-router") : join("/.model-router"));
+    const tmp = tmpdir();
+    if (
+      resolved === dataRoot ||
+      resolved.startsWith(`${dataRoot}/`) ||
+      resolved.startsWith(`${dataRoot}\\`) ||
+      resolved === tmp ||
+      resolved.startsWith(`${tmp}/`) ||
+      resolved.startsWith(`${tmp}${process.platform === "win32" ? "\\" : "/"}`)
+    ) {
+      return resolved;
+    }
+    throw new Error(
+      `MODEL_ROUTER_STATE_PATH "${resolved}" is outside the model router data directory (${dataRoot}) or the system temp directory (${tmp})`,
+    );
+  }
   const home = env.HOME;
   if (!home) throw new Error("HOME or MODEL_ROUTER_STATE_PATH is required for route persistence");
   return join(home, ".model-router", "harness-routes.jsonl");

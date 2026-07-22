@@ -168,7 +168,6 @@ function discoveryEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_CACHE_HOME",
-    "OPENCODE_CONFIG",
   ]) {
     if (source[key]) result[key] = source[key];
   }

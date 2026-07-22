@@ -3,6 +3,10 @@ import { redactValue } from "@model-router/telemetry";
 import type { FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 
+const UPSTREAM_PREVIEW_LIMIT = 4_096;
+const HOME_PREFIX =
+  typeof process.env.HOME === "string" && process.env.HOME.length > 2 ? process.env.HOME : "";
+
 export function installErrors(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
     request.log.error(
@@ -33,7 +37,8 @@ export function installErrors(app: FastifyInstance): void {
         },
       });
     }
-    const message = error instanceof Error ? error.message : "internal router error";
+    const rawMessage = error instanceof Error ? error.message : "internal router error";
+    const message = sanitizeClientMessage(rawMessage);
     const explicitStatus = Number((error as { statusCode?: number }).statusCode);
     const status = Number.isInteger(explicitStatus)
       ? explicitStatus
@@ -52,9 +57,18 @@ export function installErrors(app: FastifyInstance): void {
 
 function safeUpstreamError(body?: string): unknown {
   if (!body) return undefined;
+  const truncated =
+    body.length > UPSTREAM_PREVIEW_LIMIT ? `${body.slice(0, UPSTREAM_PREVIEW_LIMIT)}…` : body;
   try {
-    return redactValue(JSON.parse(body));
+    return redactValue(JSON.parse(truncated));
   } catch {
-    return String(redactValue(body)).slice(0, 4_096);
+    return sanitizeClientMessage(String(redactValue(truncated)));
   }
+}
+
+export function sanitizeClientMessage(message: string): string {
+  let safe = message;
+  if (HOME_PREFIX) safe = safe.split(HOME_PREFIX).join("~");
+  safe = safe.replace(/\/[^\s"'<>]+\/[^\s"'<>]+/g, "<path>");
+  return safe.slice(0, UPSTREAM_PREVIEW_LIMIT);
 }

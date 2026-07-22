@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { FeedbackEvent, RouteDecision, RouteStats } from "@model-router/contracts";
 import type { ObservedModelMetrics, RouterState } from "@model-router/router-core";
@@ -45,8 +45,17 @@ export class TelemetryStore implements RouterState {
 
   constructor(path: string, options: { now?: () => number } = {}) {
     this.#now = options.now ?? Date.now;
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+    if (path !== ":memory:") {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    }
     this.database = new Database(path);
+    if (path !== ":memory:") {
+      try {
+        chmodSync(path, 0o600);
+      } catch {
+        // Chmod is best-effort; the directory is already 0o700.
+      }
+    }
     this.database.pragma("journal_mode = WAL");
     migrate(this.database);
   }

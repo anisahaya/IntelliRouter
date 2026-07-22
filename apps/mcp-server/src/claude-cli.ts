@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
@@ -131,8 +130,9 @@ async function readAvailableModels(path: string): Promise<string[] | undefined> 
 }
 
 function defaultSettingsPath(env: NodeJS.ProcessEnv): string {
-  const root = env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), ".claude");
-  return join(root, "settings.json");
+  if (env.CLAUDE_CONFIG_DIR) return join(env.CLAUDE_CONFIG_DIR, "settings.json");
+  if (env.HOME) return join(env.HOME, ".claude", "settings.json");
+  throw new Error("HOME or CLAUDE_CONFIG_DIR is required to locate Claude Code settings");
 }
 
 function discoveryEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

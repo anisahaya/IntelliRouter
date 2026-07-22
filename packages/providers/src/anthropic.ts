@@ -1,6 +1,6 @@
 import type { ModelDefinition, NormalizedRequest, Protocol } from "@model-router/contracts";
 import type { ErrorClass } from "@model-router/router-core";
-import type { PreparedProviderRequest, ProviderAdapter } from "./base.js";
+import { assertSafeEgress, type PreparedProviderRequest, type ProviderAdapter } from "./base.js";
 import { joinUrl } from "./streaming.js";
 
 export class AnthropicAdapter implements ProviderAdapter {
@@ -28,6 +28,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 
   send(prepared: PreparedProviderRequest, signal?: AbortSignal): Promise<Response> {
+    assertSafeEgress(prepared.url);
     return fetch(prepared.url, { ...prepared.init, signal });
   }
 

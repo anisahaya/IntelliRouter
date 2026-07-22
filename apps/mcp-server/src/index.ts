@@ -8,11 +8,14 @@ import type { HarnessExecOptions } from "./harness-exec.js";
 import type { HarnessRouterOptions } from "./harness-router.js";
 import {
   autoRouteInput,
+  boundedString,
+  boundedStringOptional,
   createToolHandlers,
   delegateCodexTaskInput,
   delegateHarnessTaskInput,
   failure,
   genericObjectOutput,
+  readonlyHarnessTaskInput,
   routeHarnessTaskInput,
   routeTaskInput,
   routeTaskOutput,
@@ -68,9 +71,9 @@ export function createMcpServer(
       description:
         "Read aggregate local routing telemetry with optional time, model, and task filters.",
       inputSchema: {
-        since: z.string().optional(),
-        model: z.string().optional(),
-        task: z.string().optional(),
+        since: boundedStringOptional(1, 64),
+        model: boundedStringOptional(1, 128),
+        task: boundedStringOptional(1, 64),
       },
       outputSchema: genericObjectOutput,
     },
@@ -87,10 +90,10 @@ export function createMcpServer(
     {
       description: "Record an observable outcome for one prior route decision.",
       inputSchema: {
-        routeId: z.string().min(1),
+        routeId: boundedString(1, 256),
         outcome: z.enum(["success", "failure", "corrected", "abandoned"]),
         score: z.number().min(0).max(1).optional(),
-        tags: z.array(z.string().max(64)).max(16).default([]),
+        tags: z.array(boundedString(1, 64)).max(16).default([]),
       },
       outputSchema: genericObjectOutput,
     },
@@ -123,13 +126,13 @@ export function createMcpServer(
       description:
         "Delegate one bounded prompt through the compatibility proxy with a strict output-token cap.",
       inputSchema: {
-        prompt: z.string().min(1).max(32_000),
-        profile: z.string().min(1).max(64).optional(),
+        prompt: boundedString(1, 32_000),
+        profile: boundedStringOptional(1, 64),
         protocol: z
           .enum(["openai-chat", "openai-responses", "anthropic-messages"])
           .default("openai-chat"),
-        model: z.string().max(128).optional(),
-        session: z.string().max(512).optional(),
+        model: boundedStringOptional(1, 128),
+        session: boundedStringOptional(1, 512),
         maxOutputTokens: z.number().int().min(1).max(8_192).default(1_024),
       },
       outputSchema: genericObjectOutput,
@@ -197,7 +200,7 @@ export function createMcpServer(
       inputSchema: {
         routeId: z.string().uuid(),
         outcome: z.enum(["success", "failure", "corrected", "abandoned"]),
-        reason: z.string().max(512).optional(),
+        reason: boundedStringOptional(1, 512),
       },
       outputSchema: genericObjectOutput,
     },
