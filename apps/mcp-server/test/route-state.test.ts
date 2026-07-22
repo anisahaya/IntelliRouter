@@ -132,7 +132,7 @@ describe("harness route state", () => {
         partialWriteDetected: false,
       }) + "\n";
     await writeFile(path, line.repeat(120_000), { mode: 0o600 });
-    const found = await getRouteRecord(record.routeId, {
+    const found = await getRouteRecord(record.routeId!, {
       path,
       env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },
     });
