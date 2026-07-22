@@ -1,16 +1,6 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
-  "files": {
-    "includes": [
-      "**",
-      "!node_modules",
-      "!dist",
-      "!coverage",
-      "!pnpm-lock.yaml",
-      "!.codex-worktrees",
-      "!.codex-worktrees/**"
-    ]
-  },
+  "files": { "includes": ["**", "!node_modules", "!dist", "!coverage", "!pnpm-lock.yaml"] },
   "formatter": { "enabled": true, "indentStyle": "space", "lineWidth": 100 },
   "linter": { "enabled": true, "rules": { "preset": "none" } },
   "javascript": { "formatter": { "quoteStyle": "double" } }
