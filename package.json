@@ -29,15 +29,15 @@
     "smoke": "node scripts/smoke.mjs",
     "mcp:smoke": "node scripts/mcp-smoke.mjs",
     "postman": "node scripts/postman-smoke.mjs",
-    "validate:skill": "UV_CACHE_DIR=${TMPDIR:-/tmp}/model-router-uv-cache uv run --with pyyaml python ${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py skills/intelligent-model-router",
-    "validate:plugin": "UV_CACHE_DIR=${TMPDIR:-/tmp}/model-router-uv-cache uv run --with pyyaml python ${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py .",
+    "validate:skill": "node scripts/validate.mjs skill",
+    "validate:plugin": "node scripts/validate.mjs plugin",
     "validate:product": "node scripts/validate-product.mjs",
     "ci": "pnpm lint && pnpm typecheck && pnpm validate:product && pnpm test:coverage && pnpm build && pnpm pack:check && pnpm smoke && pnpm postman && pnpm mcp:smoke",
     "verify": "pnpm run ci && pnpm validate:skill && pnpm validate:plugin"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",
-    "better-sqlite3": "^12.5.0",
+    "better-sqlite3": "12.11.1",
     "commander": "^14.0.2",
     "fastify": "^5.6.2",
     "yaml": "^2.8.2",
@@ -45,7 +45,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.8",
-    "@types/better-sqlite3": "^7.6.13",
+    "@types/better-sqlite3": "7.6.13",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "4.1.10",
     "newman": "^6.2.1",

@@ -12,7 +12,7 @@ importers:
         specifier: ^1.25.2
         version: 1.29.0(zod@4.4.3)
       better-sqlite3:
-        specifier: ^12.5.0
+        specifier: 12.11.1
         version: 12.11.1
       commander:
         specifier: ^14.0.2
@@ -31,7 +31,7 @@ importers:
         specifier: ^2.3.8
         version: 2.5.3
       '@types/better-sqlite3':
-        specifier: ^7.6.13
+        specifier: 7.6.13
         version: 7.6.13
       '@types/node':
         specifier: ^24.10.1
