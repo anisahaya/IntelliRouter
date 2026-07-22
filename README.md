@@ -171,4 +171,6 @@ pnpm run verify
 
 All integration checks use local mock providers and placeholder credentials.
 
+Supply-chain checks run locally in CI: `pnpm audit --prod --audit-level=high`, the checked-in moderate-advisory policy, and `pnpm licenses list --prod --json` against the production license policy. The Postman smoke check is static as well as runtime: every request must use `{{baseUrl}}/explicit-path` or an explicit loopback URL, and collection scripts cannot make dynamic outbound requests.
+
 Licensed under MIT.

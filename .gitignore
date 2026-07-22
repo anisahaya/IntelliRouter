@@ -7,5 +7,6 @@ coverage/
 .env
 *.log
 .DS_Store
+.codex-worktrees/
 
 router.config.yaml
