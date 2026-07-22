@@ -12,6 +12,7 @@ import type {
   ReasoningEffort,
   RouteOutcome,
 } from "@model-router/contracts";
+import { parseBoundedJSON } from "@model-router/telemetry";
 
 export interface RouteStateOptions {
   path?: string;
@@ -208,7 +209,7 @@ async function readRecords(options: RouteStateOptions): Promise<HarnessRouteReco
       .flatMap((line) => {
         if (line.length > MAX_RECORD_BYTES) return [];
         try {
-          return [JSON.parse(line) as HarnessRouteRecord];
+          return [parseBoundedJSON(line, 64 * 1024) as HarnessRouteRecord];
         } catch {
           return [];
         }
@@ -271,7 +272,7 @@ async function readRecordsRaw(path: string): Promise<HarnessRouteRecord[]> {
       .flatMap((line) => {
         if (line.length > MAX_RECORD_BYTES) return [];
         try {
-          return [JSON.parse(line) as HarnessRouteRecord];
+          return [parseBoundedJSON(line, 64 * 1024) as HarnessRouteRecord];
         } catch {
           return [];
         }

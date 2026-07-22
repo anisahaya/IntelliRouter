@@ -1,6 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { join } from "node:path";
 import type { ReasoningEffort, RepoSignals } from "@model-router/contracts";
+import { parseBoundedJSON } from "@model-router/telemetry";
 import {
   assertRootInvocation,
   boundedOutput,
@@ -262,7 +263,7 @@ export function extractOpenCodeOutput(output: string): string {
   const texts: string[] = [];
   for (const line of output.split("\n")) {
     try {
-      const event = JSON.parse(line) as Record<string, unknown>;
+      const event = parseBoundedJSON(line, 32 * 1024) as Record<string, unknown>;
       const part = event.part as Record<string, unknown> | undefined;
       const text =
         typeof event.text === "string"
@@ -281,7 +282,7 @@ export function extractOpenCodeOutput(output: string): string {
 function extractSessionId(output: string): string | undefined {
   for (const line of output.split("\n")) {
     try {
-      const event = JSON.parse(line) as Record<string, unknown>;
+      const event = parseBoundedJSON(line, 32 * 1024) as Record<string, unknown>;
       for (const value of [event.sessionID, event.sessionId, event.session_id]) {
         if (typeof value === "string" && value.length > 0) return value;
       }

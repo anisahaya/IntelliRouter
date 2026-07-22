@@ -3,7 +3,7 @@ import { resolveApiKey } from "@model-router/config";
 import type { ModelDefinition, Protocol, RouteDecision } from "@model-router/contracts";
 import { adapterFor, responseRequestId, UpstreamError } from "@model-router/providers";
 import { canFallback, type ErrorClass } from "@model-router/router-core";
-import { redactValue } from "@model-router/telemetry";
+import { parseBoundedJSON, redactValue } from "@model-router/telemetry";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { RouterRuntime } from "../app.js";
 import { normalizeRequest } from "./normalize.js";
@@ -750,7 +750,7 @@ function extractUsage(
 ): { inputTokens: number; outputTokens: number } {
   if (!contentType.includes("json")) return { inputTokens: 0, outputTokens: 0 };
   try {
-    const body = JSON.parse(buffer.toString("utf8")) as Record<string, unknown>;
+    const body = parseBoundedJSON(buffer.toString("utf8"), 1024 * 1024) as Record<string, unknown>;
     const usage = (body.usage ?? {}) as Record<string, unknown>;
     return {
       inputTokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
@@ -797,7 +797,7 @@ function sanitizePreview(value: string, runtime: RouterRuntime): string {
     value.length > ERROR_PREVIEW_LIMIT ? `${value.slice(0, ERROR_PREVIEW_LIMIT)}…` : value;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(capped);
+    parsed = parseBoundedJSON(capped, ERROR_PREVIEW_LIMIT);
   } catch {
     parsed = capped;
   }

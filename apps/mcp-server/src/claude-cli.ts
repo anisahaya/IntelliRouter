@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
+import { parseBoundedJSON } from "@model-router/telemetry";
 
 const execFileAsync = promisify(execFile);
 const defaultAliases = ["opus", "sonnet", "haiku"];
@@ -62,7 +63,7 @@ export async function discoverClaudeModels(
 
 export function parseClaudeAuth(output: string): { loggedIn: boolean; authMethod?: string } {
   try {
-    const value = JSON.parse(output) as Record<string, unknown>;
+    const value = parseBoundedJSON(output, 256 * 1024) as Record<string, unknown>;
     return {
       loggedIn: value.loggedIn === true,
       authMethod: typeof value.authMethod === "string" ? value.authMethod : undefined,
@@ -119,7 +120,10 @@ function displayName(value: string): string {
 
 async function readAvailableModels(path: string): Promise<string[] | undefined> {
   try {
-    const value = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    const value = parseBoundedJSON(await readFile(path, "utf8"), 256 * 1024) as Record<
+      string,
+      unknown
+    >;
     return Array.isArray(value.availableModels)
       ? value.availableModels.filter((item): item is string => typeof item === "string")
       : undefined;

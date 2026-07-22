@@ -1,6 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { join } from "node:path";
 import type { ReasoningEffort, RepoSignals } from "@model-router/contracts";
+import { parseBoundedJSON } from "@model-router/telemetry";
 import { type ClaudeDiscoveryOptions, discoverClaudeModels } from "./claude-cli.js";
 import {
   assertRootInvocation,
@@ -254,7 +255,7 @@ function runChild(
 
 export function extractClaudeOutput(output: string): { output: string; sessionId?: string } {
   try {
-    const value = JSON.parse(output) as Record<string, unknown>;
+    const value = parseBoundedJSON(output, 256 * 1024) as Record<string, unknown>;
     return {
       output: typeof value.result === "string" ? value.result : output,
       sessionId:
