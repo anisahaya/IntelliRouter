@@ -108,6 +108,12 @@ export async function persistDecision(
     profile: decision.profile,
     outcome: "planned",
     featureSummary: featureSummary(decision.taskProfile),
+    selectionSnapshot: {
+      selectionRule: "min-expected-cost-subject-to-quality-floor-v1",
+      coldStart: decision.coldStart ?? false,
+      coldStartReason: decision.coldStartReason,
+      selected: decision.ranked.find((candidate) => candidate.id === decision.selected?.id),
+    },
     partialWriteDetected: false,
   };
   await appendRecord(record, options);
@@ -332,6 +338,16 @@ export function affinityDecision(input: {
     (candidate) => candidate.id === input.record.selectedCandidate,
   );
   if (!selected) return undefined;
+  if (!selected.scores.meetsQualityThreshold || !selected.scores.expectedCostComparable)
+    return undefined;
+  const affinitySelected = {
+    ...selected,
+    scores: {
+      ...selected.scores,
+      selectionReason:
+        "eligible session affinity reused; continuity avoids an observable model/cache switch",
+    },
+  };
   return {
     routeId: newRouteId(),
     harness: input.record.harness,
@@ -350,7 +366,10 @@ export function affinityDecision(input: {
     profile: input.profile,
     taskProfile: input.taskProfile,
     repoSignals: input.repoSignals,
-    ranked: [selected, ...input.candidates.filter((candidate) => candidate.id !== selected.id)],
+    ranked: [
+      affinitySelected,
+      ...input.candidates.filter((candidate) => candidate.id !== selected.id),
+    ],
     excluded: [],
     fallback: {
       kind: "current-model",
@@ -358,6 +377,8 @@ export function affinityDecision(input: {
       harness: input.record.harness,
     },
     context: input.context,
+    selectionRule: "min-expected-cost-subject-to-quality-floor-v1",
+    coldStart: false,
   };
 }
 
@@ -365,7 +386,9 @@ function featureSummary(task: AutoTaskProfile): HarnessRouteRecord["featureSumma
   return {
     taskType: task.taskType,
     complexity: task.complexity,
+    ambiguity: task.ambiguity,
     risk: task.risk,
+    mechanical: task.mechanical,
     scope: task.scope,
     requiredCapabilities: [
       ...(task.toolsRequired ? ["tools"] : []),
@@ -373,6 +396,8 @@ function featureSummary(task: AutoTaskProfile): HarnessRouteRecord["featureSumma
       ...(task.searchRequired ? ["search"] : []),
       ...(task.editRequired ? ["edit"] : []),
     ],
+    estimatedContextTokens: task.estimatedContextTokens,
+    repoTags: task.repoTags,
   };
 }
 
