@@ -5,7 +5,14 @@ import type {
   AutoRouteRequirements,
   RegisteredAgent,
 } from "@model-router/contracts";
-import { buildAutoTaskProfile, scoreAutoCandidates } from "@model-router/router-core";
+import {
+  buildAutoTaskProfile,
+  type CostContext,
+  observableCacheSwitchCost,
+  type RoutingEvidence,
+  type RoutingEvidenceReader,
+  scoreAutoCandidates,
+} from "@model-router/router-core";
 import { type CodexDiscoveryOptions, discoverCodexModels } from "./codex-cli.js";
 import { assertRootInvocation, sanitizeText } from "./context-security.js";
 import { collectRepoSignals, type RepoSignalOptions } from "./repo-signals.js";
@@ -26,6 +33,7 @@ export interface AutoRouterOptions {
   repo?: RepoSignalOptions;
   env?: NodeJS.ProcessEnv;
   trustedRoot?: string;
+  evidenceReader?: RoutingEvidenceReader;
 }
 
 export async function autoRoute(
@@ -51,13 +59,22 @@ export async function autoRoute(
   const profile = input.profile ?? "balanced";
   const currentModel = resolveCurrentModel(input.currentModel, models);
   if (!currentModel) throw new Error("current model does not match the live Codex catalog");
-  const { ranked, excluded } = scoreAutoCandidates(
+  const evidence = readRoutingEvidence(options.evidenceReader, [...models, ...agents]);
+  const cacheCosts = cacheSwitchContexts(
+    taskProfile,
+    [...models, ...agents],
+    evidence,
+    currentModel,
+  );
+  const { ranked, excluded, selected, coldStart, coldStartReason } = scoreAutoCandidates(
     [...models, ...agents],
     taskProfile,
     profile,
     currentModel,
+    evidence,
+    cacheCosts,
   );
-  const winner = ranked[0];
+  const winner = selected;
   return {
     affinityReused: false,
     status: "planned",
@@ -80,7 +97,36 @@ export async function autoRoute(
       objectiveTruncated: objective.truncated,
       conversationTruncated: conversation.truncated,
     },
+    selectionRule: "min-expected-cost-subject-to-quality-floor-v1",
+    coldStart,
+    coldStartReason,
   };
+}
+
+function cacheSwitchContexts(
+  task: ReturnType<typeof buildAutoTaskProfile>,
+  candidates: AutoCandidate[],
+  evidence: RoutingEvidence[],
+  cacheResidentModel?: string,
+): ReadonlyMap<string, CostContext> {
+  const contexts = new Map<string, CostContext>();
+  if (!cacheResidentModel) return contexts;
+  for (const candidate of candidates) {
+    if (candidate.id === cacheResidentModel) continue;
+    const cacheSwitch = observableCacheSwitchCost(task, candidate, evidence);
+    if (cacheSwitch) contexts.set(candidate.id, { cacheSwitch });
+  }
+  return contexts;
+}
+
+function readRoutingEvidence(
+  reader: RoutingEvidenceReader | undefined,
+  candidates: AutoCandidate[],
+): RoutingEvidence[] {
+  if (!reader) return [];
+  return candidates.flatMap((candidate) =>
+    reader.queryRoutingEvidence({ model: candidate.id, limit: 256 }),
+  );
 }
 
 function resolveCurrentModel(

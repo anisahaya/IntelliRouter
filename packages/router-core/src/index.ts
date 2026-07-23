@@ -6,4 +6,5 @@ export * from "./explain.js";
 export * from "./fallback.js";
 export * from "./features.js";
 export * from "./policies.js";
+export * from "./routing-math.js";
 export * from "./scorer.js";

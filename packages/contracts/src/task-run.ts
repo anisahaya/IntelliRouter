@@ -164,7 +164,7 @@ export function reduceEvidence(input: {
       verification,
       disposition: input.disposition === "reverted" ? "reverted" : "unknown",
       labelValue: "incorrect",
-      labelStrength: "none",
+      labelStrength: verification === "failed" && input.independentCheck ? "verified" : "none",
     };
   if (input.sameHiddenCaseComparison && verification === "passed")
     return {

@@ -6,8 +6,8 @@ import {
   type TaskRun,
   type TaskRunAttempt,
 } from "@model-router/contracts";
-import { redactTokenText, redactValue } from "./redaction.js";
 import type Database from "better-sqlite3";
+import { redactTokenText, redactValue } from "./redaction.js";
 
 const now = () => new Date().toISOString();
 const json = (v: unknown) => JSON.stringify(v ?? {});
@@ -33,6 +33,47 @@ export interface ContentPolicy {
   maxRunBytes?: number;
   maxTotalBytes?: number;
   retentionDays?: number;
+}
+export interface RoutingEvidenceQuery {
+  taskFingerprint?: string;
+  model?: string;
+  harness?: string;
+  limit?: number;
+}
+export interface RoutingEvidenceRecord {
+  id: string;
+  model: string;
+  taskFingerprint: string;
+  taskType?: string;
+  scope?: string;
+  complexity?: number;
+  risk?: number;
+  capabilities?: string[];
+  repoTags?: string[];
+  label: "correct" | "incorrect";
+  labelStrength: "verified" | "comparative";
+  origin: string;
+  verification: string;
+  process: string;
+  createdAt: string;
+  updatedAt: string;
+  attempts: Array<{
+    attemptOrder: number;
+    model?: string;
+    outcome?: string;
+    retry: boolean;
+    fallback: boolean;
+    inputTokens?: number;
+    outputTokens?: number;
+    tokenBasis: "actual" | "estimated" | "unknown";
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    costUsd?: number;
+    costBasis: "actual" | "estimated" | "unknown";
+    pricingProvenance?: string;
+    partialWriteDetected: boolean;
+    safeToFallback: boolean;
+  }>;
 }
 
 export class TaskRunStore {
@@ -168,7 +209,7 @@ export class TaskRunStore {
       const reduced = reduceEvidence({
         process: run.process,
         verification: verification.result,
-        independentCheck: verification.result === "passed",
+        independentCheck: verification.result === "passed" || verification.result === "failed",
         disposition: run.disposition,
       });
       this.database
@@ -198,7 +239,11 @@ export class TaskRunStore {
   content(routeId: string, kind: string, value: string, policy: ContentPolicy = {}): boolean {
     if (!policy.enabled) return false;
     const original = value;
-    try { value = redactTokenText(String(redactValue(value))); } catch { return false; }
+    try {
+      value = redactTokenText(String(redactValue(value)));
+    } catch {
+      return false;
+    }
     const bytes = Buffer.byteLength(value);
     const max = policy.maxItemBytes ?? 65536;
     if (bytes > max) value = Buffer.from(value).subarray(0, max).toString("utf8");
@@ -207,18 +252,36 @@ export class TaskRunStore {
       | undefined;
     if (!run) throw new Error("task run not found");
     return this.database.transaction(() => {
-      this.database.prepare("DELETE FROM task_run_content WHERE expires_at IS NOT NULL AND expires_at <= ?").run(now());
-      const count = this.database.prepare("SELECT COALESCE(SUM(stored_bytes),0) n FROM task_run_content").get() as { n: number };
-      const runCount = this.database.prepare("SELECT COALESCE(SUM(stored_bytes),0) n FROM task_run_content WHERE run_id=?").get(run.id) as { n: number };
-      const storedBytes = Buffer.byteLength(value); if (storedBytes + count.n > (policy.maxTotalBytes ?? 50*1024*1024) || storedBytes + runCount.n > (policy.maxRunBytes ?? 131072)) return false;
-      this.database.prepare("INSERT INTO task_run_content(id,run_id,kind,content,original_hmac,redaction_version,expires_at,stored_bytes,created_at) VALUES (?,?,?,?,?,?,?,?,?)").run(
-        this.hmac(`${routeId}:${kind}:${Date.now()}`, "content"),
-        run.id,
-        kind,
-        value,
-        this.hmac(original, "content-original"), "v1", new Date(Date.now() + (policy.retentionDays ?? 7)*86400000).toISOString(), storedBytes,
-        now(),
-      );
+      this.database
+        .prepare("DELETE FROM task_run_content WHERE expires_at IS NOT NULL AND expires_at <= ?")
+        .run(now());
+      const count = this.database
+        .prepare("SELECT COALESCE(SUM(stored_bytes),0) n FROM task_run_content")
+        .get() as { n: number };
+      const runCount = this.database
+        .prepare("SELECT COALESCE(SUM(stored_bytes),0) n FROM task_run_content WHERE run_id=?")
+        .get(run.id) as { n: number };
+      const storedBytes = Buffer.byteLength(value);
+      if (
+        storedBytes + count.n > (policy.maxTotalBytes ?? 50 * 1024 * 1024) ||
+        storedBytes + runCount.n > (policy.maxRunBytes ?? 131072)
+      )
+        return false;
+      this.database
+        .prepare(
+          "INSERT INTO task_run_content(id,run_id,kind,content,original_hmac,redaction_version,expires_at,stored_bytes,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          this.hmac(`${routeId}:${kind}:${Date.now()}`, "content"),
+          run.id,
+          kind,
+          value,
+          this.hmac(original, "content-original"),
+          "v1",
+          new Date(Date.now() + (policy.retentionDays ?? 7) * 86400000).toISOString(),
+          storedBytes,
+          now(),
+        );
       return true;
     })();
   }
@@ -271,4 +334,121 @@ export class TaskRunStore {
       attemptCount: a.n,
     };
   }
+  /** Bounded read-only verified evidence query; never mutates telemetry state. */
+  queryRoutingEvidence(query: RoutingEvidenceQuery = {}): RoutingEvidenceRecord[] {
+    const clauses = [
+      "t.label_value IN ('correct','incorrect')",
+      "t.label_strength IN ('verified','comparative')",
+      "t.verification IN ('passed','failed')",
+      "t.process IN ('completed','failed')",
+      "t.origin IN ('native','compatibility','evaluation')",
+    ];
+    const args: unknown[] = [];
+    if (query.taskFingerprint) {
+      clauses.push("t.task_fingerprint=?");
+      args.push(query.taskFingerprint);
+    }
+    if (query.model) {
+      clauses.push("t.selected_model=?");
+      args.push(query.model);
+    }
+    if (query.harness) {
+      clauses.push("t.harness=?");
+      args.push(query.harness);
+    }
+    const limit = Math.max(1, Math.min(256, Math.floor(query.limit ?? 256)));
+    const rows = this.database
+      .prepare(
+        `SELECT t.id,t.selected_model model,t.task_fingerprint,t.derived_features_json,t.repo_tags_json,t.label_value,t.label_strength,t.origin,t.verification,t.process,t.created_at,t.updated_at
+         FROM task_runs t
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY t.updated_at DESC,t.id ASC
+         LIMIT ?`,
+      )
+      .all(...args, limit) as Array<Record<string, unknown>>;
+    const attemptQuery = this.database.prepare(
+      `SELECT attempt_order,model,outcome,retry,fallback,input_tokens,output_tokens,token_basis,
+              cache_read_tokens,cache_write_tokens,cost_usd,cost_basis,pricing_provenance,
+              partial_write_detected,safe_to_fallback
+       FROM task_run_attempts
+       WHERE run_id=?
+       ORDER BY attempt_order ASC,id ASC`,
+    );
+    return rows.map((row) => {
+      const features = parseObject(row.derived_features_json);
+      const tags = parseStringArray(row.repo_tags_json);
+      const attemptRows = attemptQuery.all(row.id) as Array<Record<string, unknown>>;
+      return {
+        id: String(row.id),
+        model: String(row.model ?? ""),
+        taskFingerprint: String(row.task_fingerprint),
+        taskType: typeof features.taskType === "string" ? features.taskType : undefined,
+        scope: typeof features.scope === "string" ? features.scope : undefined,
+        complexity: typeof features.complexity === "number" ? features.complexity : undefined,
+        risk: typeof features.risk === "number" ? features.risk : undefined,
+        capabilities: Array.isArray(features.requiredCapabilities)
+          ? features.requiredCapabilities.filter(
+              (value): value is string => typeof value === "string",
+            )
+          : [],
+        repoTags: tags,
+        label: row.label_value as "correct" | "incorrect",
+        labelStrength: row.label_strength as "verified" | "comparative",
+        origin: String(row.origin),
+        verification: String(row.verification),
+        process: String(row.process),
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+        attempts: attemptRows.map((attempt) => ({
+          attemptOrder: Number(attempt.attempt_order),
+          model: optionalString(attempt.model),
+          outcome: optionalString(attempt.outcome),
+          retry: Boolean(attempt.retry),
+          fallback: Boolean(attempt.fallback),
+          inputTokens: optionalNumber(attempt.input_tokens),
+          outputTokens: optionalNumber(attempt.output_tokens),
+          tokenBasis: measurementBasis(attempt.token_basis),
+          cacheReadTokens: optionalNumber(attempt.cache_read_tokens),
+          cacheWriteTokens: optionalNumber(attempt.cache_write_tokens),
+          costUsd: optionalNumber(attempt.cost_usd),
+          costBasis: measurementBasis(attempt.cost_basis),
+          pricingProvenance: optionalString(attempt.pricing_provenance, 256),
+          partialWriteDetected: Boolean(attempt.partial_write_detected),
+          safeToFallback: Boolean(attempt.safe_to_fallback),
+        })),
+      };
+    });
+  }
+}
+
+function parseObject(value: unknown): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(String(value ?? "{}"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseStringArray(value: unknown): string[] {
+  try {
+    const parsed = JSON.parse(String(value ?? "[]"));
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalString(value: unknown, maximum = Number.POSITIVE_INFINITY): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value.slice(0, maximum) : undefined;
+}
+
+function measurementBasis(value: unknown): "actual" | "estimated" | "unknown" {
+  return value === "actual" || value === "estimated" ? value : "unknown";
 }

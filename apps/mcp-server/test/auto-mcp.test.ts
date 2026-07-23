@@ -1,6 +1,7 @@
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RoutingEvidence } from "@model-router/router-core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -44,11 +45,13 @@ describe("auto routing over MCP", () => {
       autoRouter: {
         discovery: { executable: fakeCodex },
         trustedRoot: fixtureRoot,
+        evidenceReader: frontierEvidenceReader,
       },
       codexExec: { executable: fakeCodex, trustedRoot: fixtureRoot },
       harnessRouter: {
         codex: { executable: fakeCodex },
         trustedRoot: fixtureRoot,
+        evidenceReader: frontierEvidenceReader,
         state: {
           path: join(fixtureRoot, "harness-routes.jsonl"),
           env: { ...process.env, MODEL_ROUTER_DATA_DIR: fixtureRoot },
@@ -159,6 +162,36 @@ describe("auto routing over MCP", () => {
         arguments: { routeId: harnessDecision.routeId },
       });
       expect(explained.isError).toBeUndefined();
+      const explanation = (
+        explained.structuredContent as {
+          result: {
+            selectionSnapshot: {
+              selectionRule: string;
+              selected: {
+                scores: {
+                  qualityThreshold: number;
+                  evidence: { calibrated: boolean; strength: string };
+                  expectedCost: number;
+                  expectedCostComponents: Record<string, number>;
+                  selectionReason: string;
+                };
+              };
+            };
+          };
+        }
+      ).result.selectionSnapshot;
+      expect(explanation).toMatchObject({
+        selectionRule: "min-expected-cost-subject-to-quality-floor-v1",
+        selected: {
+          scores: {
+            qualityThreshold: expect.any(Number),
+            evidence: { calibrated: false, strength: expect.any(String) },
+            expectedCost: expect.any(Number),
+            expectedCostComponents: expect.any(Object),
+            selectionReason: expect.stringContaining("lowest expected"),
+          },
+        },
+      });
       const feedback = await client.callTool({
         name: "submit_harness_feedback",
         arguments: { routeId: harnessDecision.routeId, outcome: "success" },
@@ -170,3 +203,45 @@ describe("auto routing over MCP", () => {
     }
   });
 });
+
+const frontierEvidenceReader = {
+  queryRoutingEvidence(query?: { model?: string }): RoutingEvidence[] {
+    if (query?.model !== "gpt-frontier") return [];
+    return Array.from({ length: 20 }, (_, index) => ({
+      id: `frontier-${index}`,
+      model: "gpt-frontier",
+      taskFingerprint: `frontier-task-${index}`,
+      taskType: "implementation",
+      scope: "multi",
+      complexity: 0.7,
+      risk: 0.42,
+      capabilities: ["tools", "edit"],
+      repoTags: ["package.json"],
+      label: "correct",
+      labelStrength: "verified",
+      origin: "native",
+      verification: "passed",
+      process: "completed",
+      createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+      attempts: [
+        {
+          attemptOrder: 0,
+          model: "gpt-frontier",
+          outcome: "completed",
+          retry: false,
+          fallback: false,
+          inputTokens: 100,
+          outputTokens: 20,
+          tokenBasis: "actual",
+          cacheReadTokens: 10,
+          cacheWriteTokens: 0,
+          costUsd: 0.4,
+          costBasis: "actual",
+          pricingProvenance: "observed-receipt",
+          partialWriteDetected: false,
+          safeToFallback: true,
+        },
+      ],
+    }));
+  },
+};
