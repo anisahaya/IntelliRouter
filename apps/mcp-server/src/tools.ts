@@ -225,6 +225,14 @@ export function createToolHandlers(
     }) => ({
       result: await client.feedback(input),
     }),
+    recordTaskRunVerification: async (input: {
+      routeId: string;
+      kind: string;
+      result: string;
+      checkName: string;
+      latencyMs?: number;
+      evidenceHash?: string;
+    }) => ({ result: await client.recordTaskRunVerification(input) }),
     models: async () => ({ result: await client.models() }),
     delegate: async (input: {
       prompt: string;

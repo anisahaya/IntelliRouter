@@ -5,6 +5,7 @@ import type { FeedbackEvent, RouteDecision, RouteStats } from "@model-router/con
 import type { ObservedModelMetrics, RouterState } from "@model-router/router-core";
 import Database from "better-sqlite3";
 import { migrate } from "./migrations.js";
+import { TaskRunStore } from "./task-runs.js";
 
 export interface RequestMetric {
   routeId: string;
@@ -35,6 +36,7 @@ interface HealthConfig {
 
 export class TelemetryStore implements RouterState {
   readonly database: Database.Database;
+  readonly taskRuns: TaskRunStore;
   readonly #now: () => number;
   #health: HealthConfig = {
     windowSize: 20,
@@ -58,6 +60,11 @@ export class TelemetryStore implements RouterState {
     }
     this.database.pragma("journal_mode = WAL");
     migrate(this.database);
+    this.taskRuns = new TaskRunStore(this.database, this.sessionSalt());
+  }
+
+  getSafeReceipt(routeId: string) {
+    return this.taskRuns.receipt(routeId);
   }
 
   close(): void {
@@ -280,6 +287,15 @@ export class TelemetryStore implements RouterState {
           JSON.stringify(candidate.scores),
         );
       }
+      this.taskRuns.createRun({
+        routeId: decision.id,
+        origin: "compatibility",
+        taskFingerprint: decision.features.taskType,
+        algorithm: "deterministic-router",
+        selectedModel: decision.logicalModel,
+        profile: decision.profile,
+        derivedFeatures: decision.features,
+      });
     })();
   }
 
@@ -344,6 +360,27 @@ export class TelemetryStore implements RouterState {
         attempt.bytesEmitted ? 1 : 0,
         new Date().toISOString(),
       );
+    this.taskRuns.recordAttempt(attempt.routeId, {
+      attemptOrder: attempt.attemptOrder,
+      model: attempt.modelId,
+      outcome:
+        attempt.outcome === "success"
+          ? "completed"
+          : attempt.outcome === "canceled"
+            ? "canceled"
+            : "failed",
+      retry: attempt.attemptOrder > 0,
+      fallback: attempt.attemptOrder > 0,
+      inputTokens: attempt.inputTokens,
+      outputTokens: attempt.outputTokens,
+      tokenBasis: "actual",
+      latencyMs: attempt.latencyMs,
+      costUsd: attempt.estimatedCostUsd,
+      costBasis: "estimated",
+      errorClass: attempt.errorClass,
+      partialWriteDetected: Boolean(attempt.bytesEmitted),
+      safeToFallback: !attempt.bytesEmitted,
+    });
   }
 
   recordMetric(metric: RequestMetric): void {
@@ -364,6 +401,17 @@ export class TelemetryStore implements RouterState {
         metric.finalModel ?? null,
         metric.fallbackCount ?? 0,
       );
+    this.taskRuns.completeProcess(
+      metric.routeId,
+      metric.outcome === "canceled"
+        ? "canceled"
+        : metric.outcome === "failure"
+          ? "failed"
+          : metric.status >= 200 && metric.status < 400
+            ? "completed"
+            : "failed",
+      { partialWriteDetected: false, safeToFallback: true },
+    );
   }
 
   recordFeedback(event: FeedbackEvent): void {
@@ -382,6 +430,12 @@ export class TelemetryStore implements RouterState {
         JSON.stringify(event.tags),
         new Date().toISOString(),
       );
+    this.taskRuns.event(event.routeId, "feedback", {
+      outcome: event.outcome,
+      score: event.score,
+      tags: event.tags,
+      reasonCategory: event.reasonCategory,
+    });
   }
 
   getStats(filters: { since?: string; model?: string; task?: string } = {}): RouteStats {

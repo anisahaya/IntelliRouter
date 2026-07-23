@@ -12,11 +12,15 @@ import type {
   ReasoningEffort,
   RouteOutcome,
 } from "@model-router/contracts";
+import type { TelemetryStore } from "@model-router/telemetry";
 import { parseBoundedJSON } from "@model-router/telemetry";
 
 export interface RouteStateOptions {
   path?: string;
   env?: NodeJS.ProcessEnv;
+  telemetryStore?: TelemetryStore;
+  databasePath?: string;
+  legacyJsonlPath?: string;
 }
 
 export interface RouteIdentityInput {
@@ -66,6 +70,17 @@ export async function persistDecision(
     partialWriteDetected: false,
   };
   await appendRecord(record, options);
+  options.telemetryStore?.taskRuns.createRun({
+    routeId: record.routeId,
+    origin: "native",
+    taskFingerprint: record.taskFingerprint,
+    workspaceFingerprint: record.workspaceFingerprint,
+    selectedModel: record.selectedCandidate,
+    effort: record.reasoningEffort,
+    harness: record.harness,
+    profile: record.profile,
+    derivedFeatures: record.featureSummary,
+  });
   return record;
 }
 
@@ -106,6 +121,20 @@ export async function updateRouteOutcome(
     partialWriteDetected: input.partialWriteDetected ?? current.partialWriteDetected,
   };
   await appendRecord(updated, options);
+  options.telemetryStore?.taskRuns.completeProcess(
+    routeId,
+    outcome === "success"
+      ? "completed"
+      : outcome === "timed-out"
+        ? "timed-out"
+        : outcome === "abandoned"
+          ? "canceled"
+          : "failed",
+    {
+      partialWriteDetected: updated.partialWriteDetected,
+      safeToFallback: !updated.partialWriteDetected,
+    },
+  );
   await compactStateIfLarge(options);
   return updated;
 }

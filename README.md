@@ -127,7 +127,9 @@ Native delegation defaults to 120 seconds for small or mechanical work and 300 s
 
 ### Privacy and security
 
-SQLite stores route features, approximate token counts, scores, aliases, latency, status, cost estimates, HMAC-hashed session IDs, provider attempts, and explicit feedback. Raw prompt/response storage and unhashed sessions are rejected because those modes are not safely implemented in v0.1. Logs redact authorization, API key, cookie, credential, token, password, and secret-shaped fields.
+SQLite stores route features, approximate token counts, scores, aliases, latency, status, cost estimates, HMAC-hashed session IDs, provider attempts, and explicit feedback. Raw content capture is disabled by default and only available through bounded, opt-in APIs; unhashed sessions remain rejected. Logs redact authorization, API key, cookie, credential, token, password, and secret-shaped fields.
+
+Task-run records extend this telemetry with process/verification state and safe receipts. Source, raw content, and embeddings remain opt-in and bounded by privacy settings (`storeSource`, `storeEmbeddings`, and content byte/retention caps); no runtime capture occurs unless explicitly enabled.
 
 ### CLI
 

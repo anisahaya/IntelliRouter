@@ -110,6 +110,62 @@ const migrations = [
   `
     ALTER TABLE model_health_windows ADD COLUMN window_start_attempt_id INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+    CREATE TABLE IF NOT EXISTS task_runs (
+      id TEXT PRIMARY KEY, route_id TEXT NOT NULL UNIQUE, origin TEXT NOT NULL,
+      task_fingerprint TEXT NOT NULL, workspace_fingerprint TEXT, algorithm TEXT,
+      derived_features_json TEXT NOT NULL DEFAULT '{}', repo_tags_json TEXT NOT NULL DEFAULT '[]',
+      selected_model TEXT, effort TEXT, harness TEXT, profile TEXT, context_json TEXT NOT NULL DEFAULT '{}',
+      process TEXT NOT NULL, verification TEXT NOT NULL, disposition TEXT NOT NULL,
+      label_value TEXT NOT NULL, label_strength TEXT NOT NULL,
+      partial_write_detected INTEGER NOT NULL DEFAULT 0, safe_to_fallback INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS task_run_attempts (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      attempt_order INTEGER NOT NULL, model TEXT, outcome TEXT NOT NULL, retry INTEGER NOT NULL DEFAULT 0,
+      fallback INTEGER NOT NULL DEFAULT 0, input_tokens INTEGER, output_tokens INTEGER, token_basis TEXT NOT NULL DEFAULT 'unknown',
+      cache_read_tokens INTEGER, cache_write_tokens INTEGER, latency_ms REAL, cost_usd REAL, cost_basis TEXT NOT NULL DEFAULT 'unknown',
+      pricing_provenance TEXT, error_class TEXT, partial_write_detected INTEGER NOT NULL DEFAULT 0, safe_to_fallback INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL, UNIQUE(run_id, attempt_order)
+    );
+    CREATE TABLE IF NOT EXISTS task_run_verifications (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL, result TEXT NOT NULL, check_name TEXT NOT NULL, latency_ms REAL, evidence_hash TEXT, created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS task_run_events (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, UNIQUE(run_id,id)
+    );
+    CREATE TABLE IF NOT EXISTS task_run_content (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL, content TEXT NOT NULL, original_hmac TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    ALTER TABLE task_run_content ADD COLUMN redaction_version TEXT NOT NULL DEFAULT 'v1';
+    ALTER TABLE task_run_content ADD COLUMN expires_at TEXT;
+    ALTER TABLE task_run_content ADD COLUMN stored_bytes INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS task_run_embeddings (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      model TEXT NOT NULL, dimensions INTEGER NOT NULL CHECK(dimensions BETWEEN 1 AND 4096), values_blob BLOB NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS dataset_imports (
+      id TEXT PRIMARY KEY, manifest_json TEXT NOT NULL, external_id_hmac TEXT NOT NULL, label TEXT NOT NULL,
+      strength TEXT NOT NULL, source TEXT, model_pair TEXT, created_at TEXT NOT NULL, UNIQUE(external_id_hmac)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_runs_route ON task_runs(route_id);
+    CREATE INDEX IF NOT EXISTS idx_task_runs_created ON task_runs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_task_attempts_run ON task_run_attempts(run_id, attempt_order);
+    CREATE INDEX IF NOT EXISTS idx_task_events_run ON task_run_events(run_id, created_at);
+    INSERT OR IGNORE INTO task_runs (id, route_id, origin, task_fingerprint, process, verification, disposition, label_value, label_strength, created_at, updated_at)
+      SELECT 'legacy-' || id, id, CASE WHEN kind='compatibility' THEN 'compatibility' ELSE 'imported' END,
+        'legacy-sha256-v0:' || lower(hex(features_json)), CASE WHEN EXISTS (SELECT 1 FROM request_metrics m WHERE m.route_id=route_decisions.id) THEN 'completed' ELSE 'planned' END,
+        'not-run', 'unknown', 'unknown', CASE WHEN EXISTS (SELECT 1 FROM request_metrics m WHERE m.route_id=route_decisions.id) THEN 'operational' ELSE 'none' END, created_at, created_at
+      FROM route_decisions;
+    INSERT OR IGNORE INTO task_run_attempts (id, run_id, attempt_order, model, outcome, input_tokens, output_tokens, token_basis, latency_ms, cost_usd, cost_basis, created_at)
+      SELECT 'legacy-metric-' || m.route_id, 'legacy-' || m.route_id, 0, m.final_model,
+        CASE WHEN m.status BETWEEN 200 AND 399 THEN 'completed' ELSE 'failed' END, m.input_tokens, m.output_tokens, 'actual', m.latency_ms, m.estimated_cost_usd, 'estimated', m.created_at
+      FROM request_metrics m;
+  `,
 ];
 
 export function migrate(database: Database.Database): void {

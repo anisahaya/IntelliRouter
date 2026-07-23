@@ -256,7 +256,7 @@ describe("telemetry", () => {
     const reopened = new TelemetryStore(path);
     expect(
       reopened.database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get(),
-    ).toBe(5);
+    ).toBe(6);
     expect(reopened.getDecision("served")?.logicalModel).toBe("cheap");
     reopened.close();
   });

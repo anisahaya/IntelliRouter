@@ -82,6 +82,16 @@ export const routerConfigSchema = z
       .object({
         storePrompts: z.boolean().default(false),
         storeResponses: z.boolean().default(false),
+        storeSource: z.boolean().default(false),
+        storeEmbeddings: z.boolean().default(false),
+        contentMaxItemBytes: z.number().int().positive().default(65536),
+        contentMaxRunBytes: z.number().int().positive().default(131072),
+        contentMaxTotalBytes: z
+          .number()
+          .int()
+          .positive()
+          .default(50 * 1024 * 1024),
+        contentRetentionDays: z.number().int().positive().default(7),
         hashSessionIds: z.boolean().default(true),
       })
       .prefault({}),
@@ -109,13 +119,6 @@ export const routerConfigSchema = z
   })
   .superRefine((value, context) => {
     const ids = new Set<string>();
-    if (value.privacy.storePrompts || value.privacy.storeResponses) {
-      context.addIssue({
-        code: "custom",
-        path: ["privacy"],
-        message: "raw prompt/response storage is not supported",
-      });
-    }
     if (!value.privacy.hashSessionIds) {
       context.addIssue({
         code: "custom",
