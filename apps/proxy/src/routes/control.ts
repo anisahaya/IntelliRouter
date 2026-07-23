@@ -44,13 +44,35 @@ export function registerControl(app: FastifyInstance, runtime: RouterRuntime): v
       return reply
         .code(404)
         .send({ error: { code: "not_found", message: "route not found", requestId: request.id } });
-    return decision;
+    return { ...decision, receipt: runtime.store.getSafeReceipt(request.params.routeId) };
   });
 
   app.post<{ Body: unknown }>("/router/feedback", async (request, reply) => {
     const event = feedbackEventSchema.parse(request.body);
     runtime.store.recordFeedback(event);
     return reply.code(202).send({ accepted: true });
+  });
+
+  app.post<{ Body: unknown }>("/router/task-runs/verification", async (request, reply) => {
+    const input = z
+      .object({
+        routeId: z.string().min(1).max(256),
+        kind: z.enum(["acceptance", "public-test", "held-out-test", "human-review"]),
+        result: z.enum(["passed", "failed", "inconclusive"]),
+        checkName: z.string().min(1).max(128),
+        latencyMs: z.number().nonnegative().optional(),
+        evidenceHash: z.string().max(256).optional(),
+      })
+      .parse(request.body);
+    const exists = runtime.store.getSafeReceipt(input.routeId);
+    if (!exists)
+      return reply
+        .code(404)
+        .send({ error: { code: "not_found", message: "route not found", requestId: request.id } });
+    runtime.store.taskRuns.verify(input.routeId, input);
+    return reply
+      .code(202)
+      .send({ accepted: true, receipt: runtime.store.getSafeReceipt(input.routeId) });
   });
 
   app.get<{ Querystring: { since?: string; model?: string; task?: string } }>(

@@ -2,9 +2,10 @@ const sensitive = /(?:token|secret|password|key|credential|authorization|cookie)
 export const TOKEN_LITERAL =
   /\b(?:sk|ghp|github_pat|xox[abprs]|key-|bearer)[-._~+/A-Za-z0-9]{8,}\b/i;
 const TOKEN_TEXT_PATTERNS = [
-  /\bBearer\s+[^\s,;]+/gi,
+  /\bBearer\s+[^\s,;"'}]+/gi,
   /\b(?:sk|ghp|github_pat|xox[abprs]|key-)[-._~+/A-Za-z0-9]{8,}\b/gi,
-  /\b(?:token|api[-_]?key|secret|authorization)\s*[:=]\s*[^\s,;]+/gi,
+  /["']?\b(?:token|api[-_]?key|secret|authorization|password|passwd|credential|cookie)\b["']?\s*[=:]\s*(?:"[^"]*"|'[^']*'|[^\s,;&}]+)/gi,
+  /(?:[?&](?:token|api[-_]?key|secret|authorization|password|credential|cookie)=)[^&#\s]+/gi,
 ];
 const MAX_DEPTH = 32;
 

@@ -91,9 +91,10 @@ export function createMcpServer(
       description: "Record an observable outcome for one prior route decision.",
       inputSchema: {
         routeId: boundedString(1, 256),
-        outcome: z.enum(["success", "failure", "corrected", "abandoned"]),
+        outcome: z.enum(["success", "failure", "corrected", "abandoned", "reverted"]),
         score: z.number().min(0).max(1).optional(),
         tags: z.array(boundedString(1, 64)).max(16).default([]),
+        reasonCategory: boundedStringOptional(1, 64),
       },
       outputSchema: genericObjectOutput,
     },
@@ -115,6 +116,28 @@ export function createMcpServer(
     async () => {
       try {
         return success(await handlers.models());
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    "record_task_run_verification",
+    {
+      description: "Record bounded verification metadata without raw command or output.",
+      inputSchema: {
+        routeId: boundedString(1, 256),
+        kind: z.enum(["acceptance", "public-test", "held-out-test", "human-review"]),
+        result: z.enum(["passed", "failed", "inconclusive"]),
+        checkName: boundedString(1, 128),
+        latencyMs: z.number().nonnegative().optional(),
+        evidenceHash: boundedStringOptional(1, 256),
+      },
+      outputSchema: genericObjectOutput,
+    },
+    async (input) => {
+      try {
+        return success(await handlers.recordTaskRunVerification(input));
       } catch (error) {
         return failure(error);
       }
@@ -199,8 +222,21 @@ export function createMcpServer(
       description: "Attach an observable outcome to a persisted native harness route.",
       inputSchema: {
         routeId: z.string().uuid(),
-        outcome: z.enum(["success", "failure", "corrected", "abandoned"]),
+        outcome: z.enum(["success", "failure", "corrected", "abandoned", "reverted"]),
+        score: z.number().min(0).max(1).optional(),
+        tags: z.array(boundedString(1, 64)).max(16).default([]),
         reason: boundedStringOptional(1, 512),
+        reasonCategory: z
+          .enum([
+            "correctness",
+            "instruction",
+            "cost",
+            "latency",
+            "changed-scope",
+            "user-choice",
+            "unknown",
+          ])
+          .default("unknown"),
       },
       outputSchema: genericObjectOutput,
     },

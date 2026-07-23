@@ -159,11 +159,58 @@ describe("auto routing over MCP", () => {
         arguments: { routeId: harnessDecision.routeId },
       });
       expect(explained.isError).toBeUndefined();
+      expect(
+        (
+          explained.structuredContent as {
+            receipt: { process: string; verification: string; attemptCount: number };
+          }
+        ).receipt,
+      ).toMatchObject({ process: "completed", verification: "not-run", attemptCount: 1 });
+      const verified = await client.callTool({
+        name: "record_task_run_verification",
+        arguments: {
+          routeId: harnessDecision.routeId,
+          kind: "held-out-test",
+          result: "passed",
+          checkName: "native held-out suite",
+          evidenceHash: "sha256:native",
+        },
+      });
+      expect(verified.isError).toBeUndefined();
+      expect(
+        (
+          verified.structuredContent as {
+            result: { verification: string; labelStrength: string };
+          }
+        ).result,
+      ).toMatchObject({ verification: "passed", labelStrength: "verified" });
       const feedback = await client.callTool({
         name: "submit_harness_feedback",
-        arguments: { routeId: harnessDecision.routeId, outcome: "success" },
+        arguments: {
+          routeId: harnessDecision.routeId,
+          outcome: "reverted",
+          reasonCategory: "correctness",
+          tags: ["regression"],
+        },
       });
       expect(feedback.isError).toBeUndefined();
+      expect(
+        (
+          feedback.structuredContent as {
+            result: {
+              process: string;
+              verification: string;
+              disposition: string;
+              labelValue: string;
+            };
+          }
+        ).result,
+      ).toMatchObject({
+        process: "completed",
+        verification: "passed",
+        disposition: "reverted",
+        labelValue: "correct",
+      });
     } finally {
       await client.close();
       await server.close();

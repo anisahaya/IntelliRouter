@@ -11,12 +11,57 @@ import type {
   HarnessRouteRecord,
   ReasoningEffort,
   RouteOutcome,
+  SafeReceipt,
+  VerificationKind,
 } from "@model-router/contracts";
-import { parseBoundedJSON } from "@model-router/telemetry";
+import { parseBoundedJSON, TelemetryStore } from "@model-router/telemetry";
 
 export interface RouteStateOptions {
   path?: string;
   env?: NodeJS.ProcessEnv;
+  telemetryStore?: TelemetryStore;
+  databasePath?: string;
+  legacyJsonlPath?: string;
+}
+
+interface StoreLease {
+  store: TelemetryStore;
+  owned: boolean;
+}
+
+function acquireStore(options: RouteStateOptions): StoreLease {
+  if (options.telemetryStore) return { store: options.telemetryStore, owned: false };
+  const env = options.env ?? process.env;
+  const home = env.HOME;
+  const dataRoot = env.MODEL_ROUTER_DATA_DIR ?? (home ? join(home, ".model-router") : undefined);
+  const path =
+    options.databasePath ??
+    env.MODEL_ROUTER_DATABASE_PATH ??
+    (dataRoot ? join(dataRoot, "router.db") : undefined);
+  if (!path)
+    throw new Error(
+      "HOME, MODEL_ROUTER_DATA_DIR, MODEL_ROUTER_DATABASE_PATH, or databasePath is required",
+    );
+  return { store: new TelemetryStore(path), owned: true };
+}
+
+function processForRouteOutcome(outcome: RouteOutcome) {
+  switch (outcome) {
+    case "planned":
+      return "planned" as const;
+    case "running":
+    case "fallback":
+      return "running" as const;
+    case "success":
+    case "corrected":
+      return "completed" as const;
+    case "failure":
+      return "failed" as const;
+    case "timed-out":
+      return "timed-out" as const;
+    case "abandoned":
+      return "canceled" as const;
+  }
 }
 
 export interface RouteIdentityInput {
@@ -66,6 +111,34 @@ export async function persistDecision(
     partialWriteDetected: false,
   };
   await appendRecord(record, options);
+  const lease = acquireStore(options);
+  try {
+    await syncLegacyRoutes(lease.store, options);
+    lease.store.taskRuns.createRun({
+      routeId: record.routeId,
+      origin: "native",
+      taskFingerprint: lease.store.taskRuns.fingerprint(record.taskFingerprint, "native-task"),
+      workspaceFingerprint: lease.store.taskRuns.fingerprint(
+        record.workspaceFingerprint,
+        "native-workspace",
+      ),
+      algorithm: "hmac-sha256-v1",
+      selectedModel: record.selectedCandidate,
+      effort: record.reasoningEffort,
+      harness: record.harness,
+      profile: record.profile,
+      derivedFeatures: record.featureSummary,
+      repoTags: decision.taskProfile.repoTags,
+      context: {
+        estimatedTokens: decision.taskProfile.estimatedContextTokens,
+        objectiveTruncated: decision.context.objectiveTruncated,
+        conversationTruncated: decision.context.conversationTruncated,
+      },
+      cache: { status: "unknown" },
+    });
+  } finally {
+    if (lease.owned) lease.store.close();
+  }
   return record;
 }
 
@@ -93,7 +166,12 @@ export async function findAffinity(
 export async function updateRouteOutcome(
   routeId: string,
   outcome: RouteOutcome,
-  input: { rerouteReason?: string; partialWriteDetected?: boolean } = {},
+  input: {
+    rerouteReason?: string;
+    partialWriteDetected?: boolean;
+    latencyMs?: number;
+    recordAttempt?: boolean;
+  } = {},
   options: RouteStateOptions = {},
 ): Promise<HarnessRouteRecord> {
   const current = await getRouteRecord(routeId, options);
@@ -106,15 +184,134 @@ export async function updateRouteOutcome(
     partialWriteDetected: input.partialWriteDetected ?? current.partialWriteDetected,
   };
   await appendRecord(updated, options);
+  const lease = acquireStore(options);
+  try {
+    await syncLegacyRoutes(lease.store, options);
+    lease.store.database.transaction(() => {
+      lease.store.taskRuns.completeProcess(routeId, processForRouteOutcome(outcome), {
+        latencyMs: input.latencyMs,
+        partialWriteDetected: updated.partialWriteDetected,
+        safeToFallback: !updated.partialWriteDetected,
+        tokenBasis: "unknown",
+        costBasis: "unknown",
+        cache: { status: "unknown" },
+      });
+      if (input.recordAttempt) {
+        lease.store.taskRuns.recordAttempt(routeId, {
+          attemptOrder: 1,
+          model: updated.selectedCandidate,
+          harness: updated.harness,
+          effort: updated.reasoningEffort,
+          outcome: processForRouteOutcome(outcome),
+          retry: false,
+          fallback: false,
+          tokenBasis: "unknown",
+          latencyMs: input.latencyMs,
+          costBasis: "unknown",
+          partialWriteDetected: updated.partialWriteDetected,
+          safeToFallback: !updated.partialWriteDetected,
+        });
+      }
+      if (outcome === "corrected" || outcome === "abandoned")
+        lease.store.taskRuns.event(routeId, "feedback", {
+          outcome,
+          reasonCategory: "unknown",
+        });
+    })();
+  } finally {
+    if (lease.owned) lease.store.close();
+  }
   await compactStateIfLarge(options);
   return updated;
+}
+
+export async function recordTaskRunFeedback(
+  input: {
+    routeId: string;
+    outcome: "success" | "failure" | "corrected" | "abandoned" | "reverted";
+    score?: number;
+    tags?: string[];
+    reasonCategory?:
+      | "correctness"
+      | "instruction"
+      | "cost"
+      | "latency"
+      | "changed-scope"
+      | "user-choice"
+      | "unknown";
+  },
+  options: RouteStateOptions = {},
+): Promise<SafeReceipt> {
+  const lease = acquireStore(options);
+  try {
+    await syncLegacyRoutes(lease.store, options);
+    lease.store.taskRuns.event(input.routeId, "feedback", {
+      outcome: input.outcome,
+      score: input.score,
+      tags: input.tags ?? [],
+      reasonCategory: input.reasonCategory ?? "unknown",
+    });
+    const receipt = lease.store.getSafeReceipt(input.routeId);
+    if (!receipt) throw new Error(`Unknown harness route: ${input.routeId}`);
+    return receipt;
+  } finally {
+    if (lease.owned) lease.store.close();
+  }
 }
 
 export async function getRouteRecord(
   routeId: string,
   options: RouteStateOptions = {},
 ): Promise<HarnessRouteRecord | undefined> {
-  return (await readRecords(options)).filter((record) => record.routeId === routeId).at(-1);
+  const records = await readRecords(options);
+  let lease: StoreLease | undefined;
+  try {
+    // JSONL is the authoritative native route record. SQLite is additive telemetry;
+    // an open, migration, or import failure must not make route reads unavailable.
+    lease = acquireStore(options);
+    await syncLegacyRoutes(lease.store, options, records);
+  } catch {
+    // Preserve the JSONL result and let telemetry repair happen on a later write.
+  } finally {
+    if (lease?.owned) lease.store.close();
+  }
+  return records.filter((record) => record.routeId === routeId).at(-1);
+}
+
+export async function getTaskRunReceipt(
+  routeId: string,
+  options: RouteStateOptions = {},
+): Promise<SafeReceipt | undefined> {
+  const lease = acquireStore(options);
+  try {
+    await syncLegacyRoutes(lease.store, options);
+    return lease.store.getSafeReceipt(routeId);
+  } finally {
+    if (lease.owned) lease.store.close();
+  }
+}
+
+export async function recordTaskRunVerification(
+  input: {
+    routeId: string;
+    kind: VerificationKind;
+    result: "passed" | "failed" | "inconclusive";
+    checkName: string;
+    latencyMs?: number;
+    evidenceHash?: string;
+  },
+  options: RouteStateOptions = {},
+): Promise<SafeReceipt> {
+  const lease = acquireStore(options);
+  try {
+    await syncLegacyRoutes(lease.store, options);
+    lease.store.taskRuns.verify(input.routeId, input);
+    const receipt = lease.store.getSafeReceipt(input.routeId);
+    if (!receipt) throw new Error(`Unknown harness route: ${input.routeId}`);
+    return receipt;
+  } finally {
+    if (lease.owned) lease.store.close();
+  }
 }
 
 export function newRouteId(): string {
@@ -285,7 +482,7 @@ async function readRecordsRaw(path: string): Promise<HarnessRouteRecord[]> {
 
 function statePath(options: RouteStateOptions): string {
   const env = options.env ?? process.env;
-  const candidate = options.path ?? env.MODEL_ROUTER_STATE_PATH;
+  const candidate = options.legacyJsonlPath ?? options.path ?? env.MODEL_ROUTER_STATE_PATH;
   if (candidate) {
     const resolved = resolve(candidate);
     const home = env.HOME ?? "";
@@ -326,4 +523,22 @@ function statePath(options: RouteStateOptions): string {
 
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+async function syncLegacyRoutes(
+  store: TelemetryStore,
+  options: RouteStateOptions,
+  knownRecords?: HarnessRouteRecord[],
+): Promise<void> {
+  const path = statePath(options);
+  const records = knownRecords ?? (await readRecords(options));
+  const source = await readFile(path).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!source) return;
+  store.taskRuns.importLegacyNativeRoutes(
+    records,
+    createHash("sha256").update(source).digest("hex"),
+  );
 }

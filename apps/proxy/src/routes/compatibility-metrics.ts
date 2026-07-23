@@ -3,8 +3,8 @@ import { parseBoundedJSON } from "@model-router/telemetry";
 import type { RouterRuntime } from "../app.js";
 
 export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export function recordFailedAttempt(
@@ -67,7 +67,8 @@ export function providerFailure(errorClass: string): boolean {
   ].includes(errorClass);
 }
 
-export function estimateCost(model: ModelDefinition, usage: TokenUsage): number {
+export function estimateCost(model: ModelDefinition, usage: TokenUsage): number | undefined {
+  if (usage.inputTokens === undefined || usage.outputTokens === undefined) return undefined;
   return (
     (usage.inputTokens * model.cost.inputPerMillion +
       usage.outputTokens * model.cost.outputPerMillion) /
@@ -76,15 +77,15 @@ export function estimateCost(model: ModelDefinition, usage: TokenUsage): number 
 }
 
 export function extractStreamUsage(text: string): TokenUsage {
-  const result = { inputTokens: 0, outputTokens: 0 };
+  const result: TokenUsage = {};
   for (const line of text.split(/\r?\n/)) {
     if (!line.startsWith("data:")) continue;
     const data = line.slice(5).trim();
     if (!data || data === "[DONE]") continue;
     try {
       const usage = extractUsage(Buffer.from(data), "application/json");
-      if (usage.inputTokens > 0) result.inputTokens = usage.inputTokens;
-      if (usage.outputTokens > 0) result.outputTokens = usage.outputTokens;
+      if (usage.inputTokens !== undefined) result.inputTokens = usage.inputTokens;
+      if (usage.outputTokens !== undefined) result.outputTokens = usage.outputTokens;
     } catch {
       // Malformed stream frames do not carry usable accounting data.
     }
@@ -93,15 +94,24 @@ export function extractStreamUsage(text: string): TokenUsage {
 }
 
 export function extractUsage(buffer: Buffer, contentType: string): TokenUsage {
-  if (!contentType.includes("json")) return { inputTokens: 0, outputTokens: 0 };
+  if (!contentType.includes("json")) return {};
   try {
     const body = parseBoundedJSON(buffer.toString("utf8"), 1024 * 1024) as Record<string, unknown>;
     const usage = (body.usage ?? {}) as Record<string, unknown>;
+    const inputTokens = finiteUsage(usage.prompt_tokens ?? usage.input_tokens);
+    const outputTokens = finiteUsage(usage.completion_tokens ?? usage.output_tokens);
+    if (inputTokens === undefined || outputTokens === undefined) return {};
     return {
-      inputTokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
-      outputTokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
+      inputTokens,
+      outputTokens,
     };
   } catch {
-    return { inputTokens: 0, outputTokens: 0 };
+    return {};
   }
+}
+
+function finiteUsage(value: unknown): number | undefined {
+  if (value === null || value === "" || typeof value === "boolean") return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }

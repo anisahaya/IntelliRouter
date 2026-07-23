@@ -37,6 +37,12 @@ export class ProxyClient {
   feedback(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request("/router/feedback", { method: "POST", body: JSON.stringify(input) });
   }
+  recordTaskRunVerification(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/router/task-runs/verification", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
 
   models(): Promise<Record<string, unknown>> {
     return this.request("/router/models");

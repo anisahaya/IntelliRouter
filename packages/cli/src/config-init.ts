@@ -9,6 +9,12 @@ const example = `server:
 privacy:
   storePrompts: false
   storeResponses: false
+  storeSource: false
+  storeEmbeddings: false
+  contentMaxItemBytes: 65536
+  contentMaxRunBytes: 131072
+  contentMaxTotalBytes: 52428800
+  contentRetentionDays: 7
   hashSessionIds: true
 models:
   - id: local-model

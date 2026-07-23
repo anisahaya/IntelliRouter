@@ -77,6 +77,7 @@ describe("telemetry", () => {
       outcome: "success",
       status: 200,
       latencyMs: 5,
+      bytesEmitted: true,
     });
     store.recordMetric({
       routeId: "request",
@@ -91,6 +92,11 @@ describe("telemetry", () => {
     expect(stats.totalAttempts).toBe(2);
     expect(stats.fallbackAttempts).toBe(1);
     expect(stats.byOutcome).toEqual({ success: 1 });
+    expect(store.getSafeReceipt("request")).toMatchObject({
+      tokenBasis: "unknown",
+      costBasis: "unknown",
+      safeToFallback: false,
+    });
     store.close();
   });
 
@@ -256,7 +262,7 @@ describe("telemetry", () => {
     const reopened = new TelemetryStore(path);
     expect(
       reopened.database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get(),
-    ).toBe(5);
+    ).toBe(6);
     expect(reopened.getDecision("served")?.logicalModel).toBe("cheap");
     reopened.close();
   });

@@ -65,6 +65,7 @@ export async function executeHarnessTask(
   if (record.reasoningEffort !== input.reasoningEffort) {
     throw new Error("Reasoning effort does not match the route decision");
   }
+  const started = performance.now();
   await updateRouteOutcome(input.routeId, "running", {}, stateOptions);
   const before =
     input.permission === "workspace-write"
@@ -84,7 +85,12 @@ export async function executeHarnessTask(
     await updateRouteOutcome(
       input.routeId,
       "failure",
-      { rerouteReason: message, partialWriteDetected },
+      {
+        rerouteReason: message,
+        partialWriteDetected,
+        latencyMs: performance.now() - started,
+        recordAttempt: true,
+      },
       stateOptions,
     );
     return {
@@ -121,6 +127,8 @@ export async function executeHarnessTask(
           ? "delegation timed out"
           : "unusable child result",
       partialWriteDetected,
+      latencyMs: performance.now() - started,
+      recordAttempt: true,
     },
     stateOptions,
   );

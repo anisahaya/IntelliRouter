@@ -5,12 +5,34 @@ import { TelemetryStore } from "@model-router/telemetry";
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
+import {
+  estimateCost,
+  extractStreamUsage,
+  extractUsage,
+} from "../src/routes/compatibility-metrics.js";
 
 let upstream: Server;
 let baseUrl: string;
 let app: FastifyInstance;
 const received: Record<string, unknown>[] = [];
 let upstreamCanceled = false;
+
+describe("compatibility measurements", () => {
+  it("distinguishes absent usage from observed zero tokens", () => {
+    const model = {
+      cost: { inputPerMillion: 2, outputPerMillion: 8 },
+    } as RouterConfig["models"][number];
+    expect(extractUsage(Buffer.from('{"id":"missing"}'), "application/json")).toEqual({});
+    expect(extractStreamUsage('data: {"id":"missing"}\n\n')).toEqual({});
+    expect(estimateCost(model, {})).toBeUndefined();
+    const zero = extractUsage(
+      Buffer.from('{"usage":{"input_tokens":0,"output_tokens":0}}'),
+      "application/json",
+    );
+    expect(zero).toEqual({ inputTokens: 0, outputTokens: 0 });
+    expect(estimateCost(model, zero)).toBe(0);
+  });
+});
 
 beforeAll(async () => {
   upstream = createServer(async (request, response) => {
@@ -357,6 +379,11 @@ describe("compatibility proxy", () => {
     const route = dry.json();
     const explanation = await app.inject({ method: "GET", url: `/router/routes/${route.id}` });
     expect(explanation.json().candidates.length).toBe(3);
+    expect(explanation.json().receipt).toMatchObject({
+      origin: "compatibility",
+      process: "planned",
+      verification: "not-run",
+    });
     expect(explanation.body).not.toContain("mock-secret");
     expect(explanation.body).not.toContain("review code");
     const feedback = await app.inject({
@@ -365,6 +392,50 @@ describe("compatibility proxy", () => {
       payload: { routeId: route.id, outcome: "success", tags: ["accepted"] },
     });
     expect(feedback.statusCode).toBe(202);
+    const verification = await app.inject({
+      method: "POST",
+      url: "/router/task-runs/verification",
+      payload: {
+        routeId: route.id,
+        kind: "public-test",
+        result: "passed",
+        checkName: "public suite",
+        evidenceHash: "sha256:public",
+      },
+    });
+    expect(verification.statusCode).toBe(202);
+    expect(verification.json().receipt).toMatchObject({
+      verification: "passed",
+      verificationCount: 1,
+      labelValue: "correct",
+      labelStrength: "verified",
+    });
+    const repeated = await app.inject({
+      method: "POST",
+      url: "/router/task-runs/verification",
+      payload: {
+        routeId: route.id,
+        kind: "public-test",
+        result: "passed",
+        checkName: "public suite",
+        evidenceHash: "sha256:public",
+      },
+    });
+    expect(repeated.json().receipt.verificationCount).toBe(1);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/router/task-runs/verification",
+          payload: {
+            routeId: "missing-route",
+            kind: "public-test",
+            result: "failed",
+            checkName: "public suite",
+          },
+        })
+      ).statusCode,
+    ).toBe(404);
     const stats = await app.inject({ method: "GET", url: "/router/stats" });
     expect(stats.json().totalRequests).toBeGreaterThanOrEqual(2);
   });

@@ -26,7 +26,13 @@ export const boundedStringOptional = (min: number, max: number) =>
 
 import { executeHarnessTask, type HarnessExecOptions } from "./harness-exec.js";
 import { type HarnessRouterOptions, routeHarnessTask } from "./harness-router.js";
-import { getRouteRecord, updateRouteOutcome } from "./route-state.js";
+import {
+  getRouteRecord,
+  getTaskRunReceipt,
+  recordTaskRunFeedback,
+  recordTaskRunVerification,
+  updateRouteOutcome,
+} from "./route-state.js";
 
 export const routeTaskInput = {
   task: boundedString(1, 32_000),
@@ -69,7 +75,10 @@ export const routeTaskOutput = {
     .max(32),
 };
 
-export const genericObjectOutput = { result: z.record(z.string(), z.unknown()) };
+export const genericObjectOutput = {
+  result: z.record(z.string(), z.unknown()),
+  receipt: z.record(z.string(), z.unknown()).optional(),
+};
 
 export const autoRouteInput = {
   objective: boundedString(1, 32_000),
@@ -225,6 +234,19 @@ export function createToolHandlers(
     }) => ({
       result: await client.feedback(input),
     }),
+    recordTaskRunVerification: async (input: {
+      routeId: string;
+      kind: "acceptance" | "public-test" | "held-out-test" | "human-review";
+      result: "passed" | "failed" | "inconclusive";
+      checkName: string;
+      latencyMs?: number;
+      evidenceHash?: string;
+    }) => {
+      const state = options.harnessRouter?.state;
+      if (await getRouteRecord(input.routeId, state))
+        return { result: await recordTaskRunVerification(input, state) };
+      return { result: await client.recordTaskRunVerification(input) };
+    },
     models: async () => ({ result: await client.models() }),
     delegate: async (input: {
       prompt: string;
@@ -247,21 +269,27 @@ export function createToolHandlers(
       result: await executeHarnessTask(input, options.harnessExec),
     }),
     explainHarnessRoute: async (routeId: string) => {
-      const result = await getRouteRecord(routeId, options.harnessRouter?.state);
+      const state = options.harnessRouter?.state;
+      const result = await getRouteRecord(routeId, state);
       if (!result) throw new Error(`Unknown harness route: ${routeId}`);
-      return { result };
+      return { result, receipt: await getTaskRunReceipt(routeId, state) };
     },
     submitHarnessFeedback: async (input: {
       routeId: string;
-      outcome: "success" | "failure" | "corrected" | "abandoned";
+      outcome: "success" | "failure" | "corrected" | "abandoned" | "reverted";
+      score?: number;
+      tags?: string[];
       reason?: string;
+      reasonCategory?:
+        | "correctness"
+        | "instruction"
+        | "cost"
+        | "latency"
+        | "changed-scope"
+        | "user-choice"
+        | "unknown";
     }) => ({
-      result: await updateRouteOutcome(
-        input.routeId,
-        input.outcome,
-        { rerouteReason: input.reason },
-        options.harnessRouter?.state,
-      ),
+      result: await recordTaskRunFeedback(input, options.harnessRouter?.state),
     }),
   };
 }
