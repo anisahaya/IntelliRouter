@@ -1302,11 +1302,11 @@ export class TaskRunStore {
           fallback: Boolean(attempt.fallback),
           inputTokens: optionalNumber(attempt.input_tokens),
           outputTokens: optionalNumber(attempt.output_tokens),
-          tokenBasis: measurementBasis(attempt.token_basis),
+          tokenBasis: routingMeasurementBasis(attempt.token_basis),
           cacheReadTokens: optionalNumber(attempt.cache_read_tokens),
           cacheWriteTokens: optionalNumber(attempt.cache_write_tokens),
           costUsd: optionalNumber(attempt.cost_usd),
-          costBasis: measurementBasis(attempt.cost_basis),
+          costBasis: routingMeasurementBasis(attempt.cost_basis),
           pricingProvenance: optionalString(attempt.pricing_provenance, 256),
           partialWriteDetected: Boolean(attempt.partial_write_detected),
           safeToFallback: Boolean(attempt.safe_to_fallback),
@@ -1344,6 +1344,6 @@ function optionalString(value: unknown, maximum = Number.POSITIVE_INFINITY): str
   return typeof value === "string" && value.length > 0 ? value.slice(0, maximum) : undefined;
 }
 
-function measurementBasis(value: unknown): "actual" | "estimated" | "unknown" {
+function routingMeasurementBasis(value: unknown): "actual" | "estimated" | "unknown" {
   return value === "actual" || value === "estimated" ? value : "unknown";
 }

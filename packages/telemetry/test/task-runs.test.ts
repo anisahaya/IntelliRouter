@@ -661,7 +661,7 @@ describe("legacy telemetry backfill", () => {
       });
       store.completeProcess(routeId, result === "passed" ? "completed" : "failed");
       store.verify(routeId, {
-        kind: "test",
+        kind: "public-test",
         result,
         checkName: `${routeId}-check`,
       });
