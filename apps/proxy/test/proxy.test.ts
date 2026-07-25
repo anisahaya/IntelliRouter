@@ -274,6 +274,13 @@ describe("compatibility proxy", () => {
       },
     });
     expect(rateLimit.headers["x-router-model"]).toBe("premium");
+    await app.close();
+    app = await buildApp({
+      config: makeConfig(20),
+      store: new TelemetryStore(":memory:"),
+      env: { MOCK_KEY: "mock-secret" },
+      logger: false,
+    });
     const timeout = await app.inject({
       method: "POST",
       url: "/v1/chat/completions",
@@ -513,7 +520,7 @@ describe("compatibility proxy", () => {
   });
 });
 
-function makeConfig(): RouterConfig {
+function makeConfig(timeoutMs = 750): RouterConfig {
   return routerConfigSchema.parse({
     server: { databasePath: ":memory:" },
     models: [
@@ -523,7 +530,7 @@ function makeConfig(): RouterConfig {
         upstreamModel: "upstream-cheap",
         baseUrl: `${baseUrl}/v1`,
         apiKeyEnv: "MOCK_KEY",
-        timeoutMs: 30,
+        timeoutMs,
         quality: 0.8,
         cost: { inputPerMillion: 0.1, outputPerMillion: 0.2 },
         capabilities: {

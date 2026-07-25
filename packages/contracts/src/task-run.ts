@@ -116,6 +116,56 @@ const taskRunAttemptSchema = z.object({
 });
 export type TaskRunAttempt = z.infer<typeof taskRunAttemptSchema>;
 
+/** Normalized, privacy-safe evidence consumed by routing and telemetry. */
+export type RoutingAttemptEvidence = Pick<
+  TaskRunAttempt,
+  | "attemptOrder"
+  | "model"
+  | "retry"
+  | "fallback"
+  | "inputTokens"
+  | "outputTokens"
+  | "tokenBasis"
+  | "cacheReadTokens"
+  | "cacheWriteTokens"
+  | "costUsd"
+  | "costBasis"
+  | "pricingProvenance"
+  | "partialWriteDetected"
+  | "safeToFallback"
+> & { outcome?: string };
+
+export interface RoutingEvidence {
+  id: string;
+  model: string;
+  taskFingerprint: string;
+  taskType?: string;
+  scope?: string;
+  complexity?: number;
+  risk?: number;
+  capabilities?: string[];
+  repoTags?: string[];
+  label: "correct" | "incorrect";
+  labelStrength: "verified" | "comparative";
+  origin?: TaskRun["origin"];
+  verification?: TaskRun["verification"];
+  process?: TaskRun["process"];
+  createdAt: string;
+  updatedAt?: string;
+  attempts: RoutingAttemptEvidence[];
+}
+
+export interface RoutingEvidenceQuery {
+  taskFingerprint?: string;
+  model?: string;
+  harness?: string;
+  limit?: number;
+}
+
+export interface RoutingEvidenceReader {
+  queryRoutingEvidence(query?: RoutingEvidenceQuery): RoutingEvidence[];
+}
+
 const taskRunVerificationSchema = z.object({
   id: z.string().min(1),
   runId: z.string().min(1),

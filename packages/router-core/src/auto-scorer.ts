@@ -5,14 +5,22 @@ import type {
   AutoTaskProfile,
   ReasoningEffort,
 } from "@model-router/contracts";
+import {
+  type CostContext,
+  estimateVerifiedSuccess,
+  expectedCompletedTaskCost,
+  normalizeEconomy,
+  qualityThreshold,
+  type RoutingEvidence,
+} from "./routing-math.js";
 
 const effortOrder: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
 
-const weights: Record<
+export const AUTO_PROFILE_WEIGHTS: Record<
   AutoRouteProfile,
   { fit: number; quality: number; speed: number; economy: number }
 > = {
-  balanced: { fit: 0.4, quality: 0.35, speed: 0.15, economy: 0.1 },
+  balanced: { fit: 0.38, quality: 0.32, speed: 0.1, economy: 0.2 },
   quality: { fit: 0.35, quality: 0.55, speed: 0.05, economy: 0.05 },
   speed: { fit: 0.35, quality: 0.2, speed: 0.4, economy: 0.05 },
   economy: { fit: 0.35, quality: 0.2, speed: 0.1, economy: 0.35 },
@@ -21,17 +29,28 @@ const weights: Record<
 export interface AutoScoreResult {
   ranked: AutoRankedCandidate[];
   excluded: Array<{ id: string; reasons: string[] }>;
+  selected?: AutoRankedCandidate;
+  coldStart: boolean;
+  coldStartReason?: string;
 }
 
-export function scoreAutoCandidates(
+type EligibleCandidate = {
+  candidate: AutoCandidate;
+  specialization: number;
+  taskFit: number;
+  success: ReturnType<typeof estimateVerifiedSuccess>;
+  cost: ReturnType<typeof expectedCompletedTaskCost>;
+};
+
+function evaluateEligibleCandidates(
   candidates: AutoCandidate[],
   task: AutoTaskProfile,
-  profile: AutoRouteProfile,
-  currentModel?: string,
-): AutoScoreResult {
+  currentModel: string | undefined,
+  evidence: RoutingEvidence[],
+  costContextByCandidate: ReadonlyMap<string, CostContext>,
+): { eligible: EligibleCandidate[]; excluded: Array<{ id: string; reasons: string[] }> } {
   const excluded: Array<{ id: string; reasons: string[] }> = [];
-  const ranked: AutoRankedCandidate[] = [];
-
+  const eligible: EligibleCandidate[] = [];
   for (const candidate of candidates) {
     const reasons = exclusions(candidate, task, currentModel);
     if (reasons.length > 0) {
@@ -45,37 +64,215 @@ export function scoreAutoCandidates(
         (task.complexity > 0.7 ? candidate.quality * 0.2 : 0) +
         (task.mechanical > 0.55 ? (candidate.speed + candidate.economy) * 0.1 : 0),
     );
-    const configured = weights[profile];
-    const total = clamp(
-      taskFit * configured.fit +
-        candidate.quality * configured.quality +
-        candidate.speed * configured.speed +
-        candidate.economy * configured.economy,
-    );
-    ranked.push({
-      id: candidate.id,
-      kind: candidate.kind,
-      displayName: candidate.displayName,
-      reasoningEffort:
-        candidate.kind !== "user-agent"
-          ? clampEffort(task.desiredEffort, candidate.supportedEfforts ?? [])
-          : undefined,
-      scores: {
-        taskFit,
-        quality: candidate.quality,
-        speed: candidate.speed,
-        economy: candidate.economy,
-        specialization,
-        total,
-      },
+    eligible.push({
+      candidate,
+      specialization,
+      taskFit,
+      success: estimateVerifiedSuccess(task, candidate.id, evidence),
+      cost: expectedCompletedTaskCost(
+        task,
+        candidate,
+        evidence,
+        costContextByCandidate.get(candidate.id),
+      ),
     });
   }
+  return { eligible, excluded };
+}
 
-  ranked.sort(
-    (left, right) => right.scores.total - left.scores.total || left.id.localeCompare(right.id),
+function rankEligibleCandidates(
+  eligible: EligibleCandidate[],
+  task: AutoTaskProfile,
+  profile: AutoRouteProfile,
+): AutoRankedCandidate[] {
+  const comparableUnits = new Set(
+    eligible.flatMap((item) => (item.cost.comparable && item.cost.unit ? [item.cost.unit] : [])),
   );
+  const canNormalizeCosts = comparableUnits.size === 1;
+  const normalizedEconomy = normalizeEconomy(
+    eligible.map((item) =>
+      canNormalizeCosts && item.cost.comparable ? item.cost.value : undefined,
+    ),
+  );
+  const threshold = qualityThreshold(task.risk);
+  const configured = AUTO_PROFILE_WEIGHTS[profile];
+
+  return eligible.map((item, index) => {
+    const economySignal =
+      canNormalizeCosts && item.cost.comparable
+        ? (normalizedEconomy[index] ?? 0.5)
+        : item.candidate.economy;
+    const total = clamp(
+      item.taskFit * configured.fit +
+        item.candidate.quality * configured.quality +
+        item.candidate.speed * configured.speed +
+        economySignal * configured.economy,
+    );
+    const meetsQualityThreshold =
+      !item.success.priorOnly && item.success.conservativeSuccess >= threshold;
+    return {
+      id: item.candidate.id,
+      kind: item.candidate.kind,
+      displayName: item.candidate.displayName,
+      reasoningEffort:
+        item.candidate.kind !== "user-agent"
+          ? clampEffort(task.desiredEffort, item.candidate.supportedEfforts ?? [])
+          : undefined,
+      scores: {
+        taskFit: item.taskFit,
+        quality: item.candidate.quality,
+        qualityHeuristic: item.candidate.quality,
+        speed: item.candidate.speed,
+        economy: economySignal,
+        specialization: item.specialization,
+        total,
+        qualityThreshold: threshold,
+        estimatedVerifiedSuccess: item.success.estimatedVerifiedSuccess,
+        conservativeSuccess: item.success.conservativeSuccess,
+        meetsQualityThreshold,
+        evidence: {
+          rawCount: item.success.rawCount,
+          neighborCount: item.success.neighborCount,
+          effectiveCount: item.success.effectiveCount,
+          priorOnly: item.success.priorOnly,
+          calibrated: false,
+          strength: item.success.evidenceStrength,
+          priorAlpha: item.success.priorAlpha,
+          priorBeta: item.success.priorBeta,
+          similarityRange: item.success.similarityRange,
+        },
+        expectedCost: item.cost.value,
+        expectedCostUnit: item.cost.unit,
+        expectedCostBasis: item.cost.basis,
+        expectedCostComparable: item.cost.comparable,
+        expectedCostComponents: item.cost.components,
+        expectedCostComponentBasis: item.cost.componentBasis,
+        pricingProvenance: item.cost.pricingProvenance,
+        cacheState: item.cost.cacheState,
+        selectionReason: meetsQualityThreshold
+          ? item.cost.comparable
+            ? "clears the risk-adjusted quality floor with comparable expected cost"
+            : "clears the quality floor but completed-task cost is not comparable"
+          : item.success.priorOnly
+            ? "cold start: no verified similar-task evidence"
+            : "conservative verified-success estimate is below the quality threshold",
+      },
+    };
+  });
+}
+
+function selectCandidate(
+  ranked: AutoRankedCandidate[],
+  currentModel: string | undefined,
+): { selected?: AutoRankedCandidate; coldStart: boolean; coldStartReason?: string } {
+  const qualityQualified = ranked.filter((item) => item.scores.meetsQualityThreshold);
+  const costQualified = qualityQualified.filter((item) => item.scores.expectedCostComparable);
+  const costUnits = new Set(
+    costQualified.flatMap((item) =>
+      item.scores.expectedCostUnit ? [item.scores.expectedCostUnit] : [],
+    ),
+  );
+  let selected: AutoRankedCandidate | undefined;
+  let coldStart = false;
+  let coldStartReason: string | undefined;
+  if (
+    qualityQualified.length > 0 &&
+    costQualified.length === qualityQualified.length &&
+    costUnits.size === 1
+  ) {
+    selected = [...costQualified].sort(
+      (left, right) =>
+        (left.scores.expectedCost ?? Number.POSITIVE_INFINITY) -
+          (right.scores.expectedCost ?? Number.POSITIVE_INFINITY) ||
+        (right.scores.conservativeSuccess ?? 0) - (left.scores.conservativeSuccess ?? 0) ||
+        right.scores.total - left.scores.total ||
+        left.id.localeCompare(right.id),
+    )[0];
+  } else if (!currentModel && ranked.length > 0) {
+    coldStart = true;
+    coldStartReason =
+      costUnits.size > 1
+        ? "verified candidates use incomparable cost units; deterministic heuristic fallback"
+        : "measured verified-success or comparable completed-task cost is unavailable";
+    selected = [...ranked].sort(
+      (left, right) => right.scores.total - left.scores.total || left.id.localeCompare(right.id),
+    )[0];
+  } else {
+    coldStart = true;
+    coldStartReason =
+      costUnits.size > 1
+        ? "verified candidates use incomparable cost units; use the current-model fallback"
+        : qualityQualified.length > costQualified.length
+          ? "at least one quality-qualified route lacks comparable completed-task cost"
+          : "no candidate clears the quality floor with comparable completed-task cost";
+  }
+  return { selected, coldStart, coldStartReason };
+}
+
+function orderRankedCandidates(
+  ranked: AutoRankedCandidate[],
+  selected: AutoRankedCandidate | undefined,
+  coldStart: boolean,
+  coldStartReason: string | undefined,
+): { ranked: AutoRankedCandidate[]; selected?: AutoRankedCandidate } {
+  const selectedId = selected?.id;
+  const ordered = ranked.map((item) =>
+    item.id === selectedId
+      ? {
+          ...item,
+          scores: {
+            ...item.scores,
+            selectionReason: coldStart
+              ? `deterministic cold-start fallback: ${coldStartReason}`
+              : "lowest expected completed-task cost among candidates clearing the quality threshold",
+          },
+        }
+      : item,
+  );
+  ordered.sort((left, right) => {
+    if (left.id === selectedId && right.id !== selectedId) return -1;
+    if (right.id === selectedId && left.id !== selectedId) return 1;
+    return (
+      Number(Boolean(right.scores.meetsQualityThreshold)) -
+        Number(Boolean(left.scores.meetsQualityThreshold)) ||
+      right.scores.total - left.scores.total ||
+      left.id.localeCompare(right.id)
+    );
+  });
+  return {
+    ranked: ordered,
+    selected: selectedId ? ordered.find((item) => item.id === selectedId) : undefined,
+  };
+}
+
+export function scoreAutoCandidates(
+  candidates: AutoCandidate[],
+  task: AutoTaskProfile,
+  profile: AutoRouteProfile,
+  currentModel?: string,
+  evidence: RoutingEvidence[] = [],
+  costContextByCandidate: ReadonlyMap<string, CostContext> = new Map(),
+): AutoScoreResult {
+  const evaluated = evaluateEligibleCandidates(
+    candidates,
+    task,
+    currentModel,
+    evidence,
+    costContextByCandidate,
+  );
+  const { eligible, excluded } = evaluated;
+  const ranked = rankEligibleCandidates(eligible, task, profile);
+
+  const { selected, coldStart, coldStartReason } = selectCandidate(ranked, currentModel);
+  const ordered = orderRankedCandidates(ranked, selected, coldStart, coldStartReason);
   excluded.sort((left, right) => left.id.localeCompare(right.id));
-  return { ranked, excluded };
+  return {
+    ranked: ordered.ranked,
+    excluded,
+    selected: ordered.selected,
+    coldStart,
+    coldStartReason,
+  };
 }
 
 export function clampEffort(

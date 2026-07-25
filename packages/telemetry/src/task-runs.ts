@@ -8,6 +8,8 @@ import {
   type HarnessRouteRecord,
   type LocalEmbedding,
   localEmbeddingSchema,
+  type RoutingEvidence,
+  type RoutingEvidenceQuery,
   reasonCategorySchema,
   reduceEvidence,
   type SafeReceipt,
@@ -74,6 +76,12 @@ export interface ContentPolicy {
   maxTotalBytes?: number;
   retentionDays?: number;
 }
+export type RoutingEvidenceRecord = Omit<RoutingEvidence, "origin" | "verification" | "process"> & {
+  origin: string;
+  verification: string;
+  process: string;
+  updatedAt: string;
+};
 
 export interface TaskRunPrivacyPolicy {
   storePrompts?: boolean;
@@ -1188,4 +1196,99 @@ export class TaskRunStore {
         .run(BACKFILL_MARKER, now());
     })();
   }
+  /** Bounded read-only verified evidence query; never mutates telemetry state. */
+  queryRoutingEvidence(query: RoutingEvidenceQuery = {}): RoutingEvidenceRecord[] {
+    const clauses = [
+      "t.label_value IN ('correct','incorrect')",
+      "t.label_strength IN ('verified','comparative')",
+      "t.verification IN ('passed','failed')",
+      "t.process IN ('completed','failed')",
+      "t.origin IN ('native','compatibility','evaluation')",
+    ];
+    const args: unknown[] = [];
+    if (query.taskFingerprint) {
+      clauses.push("t.task_fingerprint=?");
+      args.push(query.taskFingerprint);
+    }
+    if (query.model) {
+      clauses.push("t.selected_model=?");
+      args.push(query.model);
+    }
+    if (query.harness) {
+      clauses.push("t.harness=?");
+      args.push(query.harness);
+    }
+    const limit = Math.max(1, Math.min(256, Math.floor(query.limit ?? 256)));
+    const rows = this.database
+      .prepare(
+        `SELECT t.id,t.selected_model model,t.task_fingerprint,t.derived_features_json,t.repo_tags_json,t.label_value,t.label_strength,t.origin,t.verification,t.process,t.created_at,t.updated_at
+         FROM task_runs t
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY t.updated_at DESC,t.id ASC
+         LIMIT ?`,
+      )
+      .all(...args, limit) as Array<Record<string, unknown>>;
+    const attemptQuery = this.database.prepare(
+      `SELECT attempt_order,model,outcome,retry,fallback,input_tokens,output_tokens,token_basis,
+              cache_read_tokens,cache_write_tokens,cost_usd,cost_basis,pricing_provenance,
+              partial_write_detected,safe_to_fallback
+       FROM task_run_attempts
+       WHERE run_id=?
+       ORDER BY attempt_order ASC,id ASC`,
+    );
+    return rows.map((row) => {
+      const features = parseJSONRecord(row.derived_features_json);
+      const tags = parseJSONArray(row.repo_tags_json).filter(
+        (value): value is string => typeof value === "string",
+      );
+      const attemptRows = attemptQuery.all(row.id) as Array<Record<string, unknown>>;
+      return {
+        id: String(row.id),
+        model: String(row.model ?? ""),
+        taskFingerprint: String(row.task_fingerprint),
+        taskType: typeof features.taskType === "string" ? features.taskType : undefined,
+        scope: typeof features.scope === "string" ? features.scope : undefined,
+        complexity: typeof features.complexity === "number" ? features.complexity : undefined,
+        risk: typeof features.risk === "number" ? features.risk : undefined,
+        capabilities: Array.isArray(features.requiredCapabilities)
+          ? features.requiredCapabilities.filter(
+              (value): value is string => typeof value === "string",
+            )
+          : [],
+        repoTags: tags,
+        label: row.label_value as "correct" | "incorrect",
+        labelStrength: row.label_strength as "verified" | "comparative",
+        origin: String(row.origin),
+        verification: String(row.verification),
+        process: String(row.process),
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+        attempts: attemptRows.map((attempt) => ({
+          attemptOrder: Number(attempt.attempt_order),
+          model: optionalString(attempt.model),
+          outcome: optionalString(attempt.outcome),
+          retry: Boolean(attempt.retry),
+          fallback: Boolean(attempt.fallback),
+          inputTokens: finiteNumber(attempt.input_tokens),
+          outputTokens: finiteNumber(attempt.output_tokens),
+          tokenBasis: routingMeasurementBasis(attempt.token_basis),
+          cacheReadTokens: finiteNumber(attempt.cache_read_tokens),
+          cacheWriteTokens: finiteNumber(attempt.cache_write_tokens),
+          costUsd: finiteNumber(attempt.cost_usd),
+          costBasis: routingMeasurementBasis(attempt.cost_basis),
+          pricingProvenance: optionalString(attempt.pricing_provenance, 256),
+          partialWriteDetected: Boolean(attempt.partial_write_detected),
+          safeToFallback: Boolean(attempt.safe_to_fallback),
+        })),
+      };
+    }) as RoutingEvidenceRecord[];
+  }
+}
+
+function optionalString(value: unknown, maximum = Number.POSITIVE_INFINITY): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value.slice(0, maximum) : undefined;
+}
+
+function routingMeasurementBasis(value: unknown): "actual" | "estimated" | "unknown" {
+  return value === "actual" || value === "estimated" ? value : "unknown";
 }

@@ -130,7 +130,7 @@ describe("Codex model discovery", () => {
     expect(quality["prior-strong"]).toBeGreaterThan(quality["luna-like"] ?? 0);
   });
 
-  it("preserves intended Sol, Terra, and Luna routing semantics for the current catalog", async () => {
+  it("keeps catalog priors descriptive and falls back during a verified-evidence cold start", async () => {
     const model = (slug: string, description: string, priority: number) => ({
       slug,
       display_name: slug,
@@ -170,7 +170,7 @@ describe("Codex model discovery", () => {
       packageCount: 2,
       hasCi: false,
     };
-    const winner = (objective: string) => {
+    const decision = (objective: string) => {
       const task = buildAutoTaskProfile({
         objective,
         repoSignals,
@@ -182,12 +182,21 @@ describe("Codex model discovery", () => {
           minimumContextTokens: 0,
         },
       });
-      return scoreAutoCandidates(candidates, task, "balanced", "gpt-5.5").ranked[0]?.id;
+      return scoreAutoCandidates(candidates, task, "balanced", "gpt-5.5");
     };
-    expect(winner("Architect a complex repository-wide security migration")).toBe("gpt-5.6-sol");
-    expect(winner("Implement an everyday multi-file TypeScript feature and tests")).toBe(
-      "gpt-5.6-terra",
-    );
-    expect(winner("Mechanically rename a small helper and format it")).toBe("gpt-5.6-luna");
+    for (const objective of [
+      "Architect a complex repository-wide security migration",
+      "Implement an everyday multi-file TypeScript feature and tests",
+      "Mechanically rename a small helper and format it",
+    ]) {
+      const result = decision(objective);
+      expect(result.selected).toBeUndefined();
+      expect(result.coldStart).toBe(true);
+      expect(result.ranked).toHaveLength(3);
+      expect(result.ranked.every((candidate) => candidate.scores.evidence?.priorOnly)).toBe(true);
+      expect(
+        result.ranked.every((candidate) => candidate.scores.evidence?.calibrated === false),
+      ).toBe(true);
+    }
   });
 });
