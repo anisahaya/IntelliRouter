@@ -8,9 +8,6 @@ import type {
 } from "@model-router/contracts";
 import {
   buildAutoTaskProfile,
-  type CostContext,
-  observableCacheSwitchCost,
-  type RoutingEvidence,
   type RoutingEvidenceReader,
   scoreAutoCandidates,
 } from "@model-router/router-core";
@@ -27,6 +24,7 @@ import {
   type RouteStateOptions,
   routeIdentity,
 } from "./route-state.js";
+import { cacheSwitchContexts, readRoutingEvidence } from "./routing-evidence.js";
 import { resolveTrustedWorkspace } from "./workspace-security.js";
 
 export interface HarnessRouteInput {
@@ -93,7 +91,11 @@ export async function routeHarnessTask(
         env,
       });
   const evidenceReader = options.evidenceReader ?? options.state?.telemetryStore?.taskRuns;
-  const evidence = readRoutingEvidence(evidenceReader, candidates, input.harness);
+  const evidence = readRoutingEvidence(
+    evidenceReader as RoutingEvidenceReader | undefined,
+    candidates,
+    input.harness,
+  );
   const cacheCosts = cacheSwitchContexts(
     taskProfile,
     candidates,
@@ -161,33 +163,6 @@ export async function routeHarnessTask(
   };
   await persistDecision(decision, identity, { ...options.state, env });
   return decision;
-}
-
-function cacheSwitchContexts(
-  task: ReturnType<typeof buildAutoTaskProfile>,
-  candidates: AutoCandidate[],
-  evidence: RoutingEvidence[],
-  cacheResidentModel?: string,
-): ReadonlyMap<string, CostContext> {
-  const contexts = new Map<string, CostContext>();
-  if (!cacheResidentModel) return contexts;
-  for (const candidate of candidates) {
-    if (candidate.id === cacheResidentModel) continue;
-    const cacheSwitch = observableCacheSwitchCost(task, candidate, evidence);
-    if (cacheSwitch) contexts.set(candidate.id, { cacheSwitch });
-  }
-  return contexts;
-}
-
-function readRoutingEvidence(
-  reader: RoutingEvidenceReader | undefined,
-  candidates: AutoCandidate[],
-  harness: HarnessId,
-): RoutingEvidence[] {
-  if (!reader) return [];
-  return candidates.flatMap((candidate) =>
-    reader.queryRoutingEvidence({ model: candidate.id, harness, limit: 256 }),
-  );
 }
 
 async function discoverHarnessCandidates(

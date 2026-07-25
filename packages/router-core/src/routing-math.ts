@@ -1,55 +1,21 @@
-import type { AutoCandidate, AutoTaskProfile } from "@model-router/contracts";
+import type {
+  AutoCandidate,
+  AutoTaskProfile,
+  RoutingAttemptEvidence,
+  RoutingEvidence,
+  RoutingEvidenceQuery,
+  RoutingEvidenceReader,
+} from "@model-router/contracts";
 
 export type MeasurementBasis = "observed" | "estimated" | "mixed" | "unknown";
 export type CostUnit = "usd" | "tokens";
 
-export interface RoutingAttemptEvidence {
-  attemptOrder: number;
-  model?: string;
-  outcome?: string;
-  retry: boolean;
-  fallback: boolean;
-  inputTokens?: number;
-  outputTokens?: number;
-  tokenBasis: "actual" | "estimated" | "unknown";
-  cacheReadTokens?: number;
-  cacheWriteTokens?: number;
-  costUsd?: number;
-  costBasis: "actual" | "estimated" | "unknown";
-  pricingProvenance?: string;
-  partialWriteDetected?: boolean;
-  safeToFallback?: boolean;
-}
-
-export interface RoutingEvidence {
-  id: string;
-  model: string;
-  taskFingerprint: string;
-  taskType?: string;
-  scope?: string;
-  complexity?: number;
-  risk?: number;
-  capabilities?: string[];
-  repoTags?: string[];
-  label: "correct" | "incorrect";
-  labelStrength: "verified" | "comparative";
-  origin?: string;
-  verification?: string;
-  process?: string;
-  createdAt: string;
-  updatedAt?: string;
-  attempts: RoutingAttemptEvidence[];
-}
-
-export interface RoutingEvidenceQuery {
-  model?: string;
-  harness?: string;
-  limit?: number;
-}
-
-export interface RoutingEvidenceReader {
-  queryRoutingEvidence(query?: RoutingEvidenceQuery): RoutingEvidence[];
-}
+export type {
+  RoutingAttemptEvidence,
+  RoutingEvidence,
+  RoutingEvidenceQuery,
+  RoutingEvidenceReader,
+};
 
 export interface SuccessEstimate {
   estimatedVerifiedSuccess: number;
@@ -316,18 +282,13 @@ function runCost(item: RoutingEvidence): RunCost | undefined {
       unit === "usd"
         ? (attempt.costUsd ?? 0)
         : (attempt.inputTokens ?? 0) + (attempt.outputTokens ?? 0);
-    const category =
-      attempt.fallback || attempt.attemptOrder > 0
-        ? attempt.fallback
-          ? "escalations"
-          : "retries"
-        : "firstAttempt";
+    const category = attempt.fallback ? "escalations" : attempt.retry ? "retries" : "firstAttempt";
     components[category] += value;
     componentBasis[category] = combinedBasis([componentBasis[category], basis]);
     bases.push(basis);
     if (attempt.pricingProvenance) provenance.add(attempt.pricingProvenance);
 
-    if (attempt.cacheReadTokens === undefined && attempt.cacheWriteTokens === undefined) {
+    if (attempt.cacheWriteTokens === undefined) {
       cacheObserved = false;
     }
   }
@@ -386,9 +347,7 @@ export function observableCacheSwitchCost(
       if (
         neighbor.evidence.attempts.length === 0 ||
         neighbor.evidence.attempts.some(
-          (attempt) =>
-            (attempt.cacheReadTokens === undefined && attempt.cacheWriteTokens === undefined) ||
-            attempt.tokenBasis === "unknown",
+          (attempt) => attempt.cacheWriteTokens === undefined || attempt.tokenBasis === "unknown",
         )
       )
         return undefined;

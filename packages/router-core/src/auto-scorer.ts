@@ -34,23 +34,23 @@ export interface AutoScoreResult {
   coldStartReason?: string;
 }
 
-export function scoreAutoCandidates(
+type EligibleCandidate = {
+  candidate: AutoCandidate;
+  specialization: number;
+  taskFit: number;
+  success: ReturnType<typeof estimateVerifiedSuccess>;
+  cost: ReturnType<typeof expectedCompletedTaskCost>;
+};
+
+function evaluateEligibleCandidates(
   candidates: AutoCandidate[],
   task: AutoTaskProfile,
-  profile: AutoRouteProfile,
-  currentModel?: string,
-  evidence: RoutingEvidence[] = [],
-  costContextByCandidate: ReadonlyMap<string, CostContext> = new Map(),
-): AutoScoreResult {
+  currentModel: string | undefined,
+  evidence: RoutingEvidence[],
+  costContextByCandidate: ReadonlyMap<string, CostContext>,
+): { eligible: EligibleCandidate[]; excluded: Array<{ id: string; reasons: string[] }> } {
   const excluded: Array<{ id: string; reasons: string[] }> = [];
-  const eligible: Array<{
-    candidate: AutoCandidate;
-    specialization: number;
-    taskFit: number;
-    success: ReturnType<typeof estimateVerifiedSuccess>;
-    cost: ReturnType<typeof expectedCompletedTaskCost>;
-  }> = [];
-
+  const eligible: EligibleCandidate[] = [];
   for (const candidate of candidates) {
     const reasons = exclusions(candidate, task, currentModel);
     if (reasons.length > 0) {
@@ -77,7 +77,14 @@ export function scoreAutoCandidates(
       ),
     });
   }
+  return { eligible, excluded };
+}
 
+function rankEligibleCandidates(
+  eligible: EligibleCandidate[],
+  task: AutoTaskProfile,
+  profile: AutoRouteProfile,
+): AutoRankedCandidate[] {
   const comparableUnits = new Set(
     eligible.flatMap((item) => (item.cost.comparable && item.cost.unit ? [item.cost.unit] : [])),
   );
@@ -89,7 +96,8 @@ export function scoreAutoCandidates(
   );
   const threshold = qualityThreshold(task.risk);
   const configured = AUTO_PROFILE_WEIGHTS[profile];
-  const ranked: AutoRankedCandidate[] = eligible.map((item, index) => {
+
+  return eligible.map((item, index) => {
     const economySignal =
       canNormalizeCosts && item.cost.comparable
         ? (normalizedEconomy[index] ?? 0.5)
@@ -151,7 +159,12 @@ export function scoreAutoCandidates(
       },
     };
   });
+}
 
+function selectCandidate(
+  ranked: AutoRankedCandidate[],
+  currentModel: string | undefined,
+): { selected?: AutoRankedCandidate; coldStart: boolean; coldStartReason?: string } {
   const qualityQualified = ranked.filter((item) => item.scores.meetsQualityThreshold);
   const costQualified = qualityQualified.filter((item) => item.scores.expectedCostComparable);
   const costUnits = new Set(
@@ -193,15 +206,32 @@ export function scoreAutoCandidates(
           ? "at least one quality-qualified route lacks comparable completed-task cost"
           : "no candidate clears the quality floor with comparable completed-task cost";
   }
+  return { selected, coldStart, coldStartReason };
+}
 
-  if (selected) {
-    selected.scores.selectionReason = coldStart
-      ? `deterministic cold-start fallback: ${coldStartReason}`
-      : "lowest expected completed-task cost among candidates clearing the quality threshold";
-  }
-  ranked.sort((left, right) => {
-    if (left.id === selected?.id && right.id !== selected?.id) return -1;
-    if (right.id === selected?.id && left.id !== selected?.id) return 1;
+function orderRankedCandidates(
+  ranked: AutoRankedCandidate[],
+  selected: AutoRankedCandidate | undefined,
+  coldStart: boolean,
+  coldStartReason: string | undefined,
+): { ranked: AutoRankedCandidate[]; selected?: AutoRankedCandidate } {
+  const selectedId = selected?.id;
+  const ordered = ranked.map((item) =>
+    item.id === selectedId
+      ? {
+          ...item,
+          scores: {
+            ...item.scores,
+            selectionReason: coldStart
+              ? `deterministic cold-start fallback: ${coldStartReason}`
+              : "lowest expected completed-task cost among candidates clearing the quality threshold",
+          },
+        }
+      : item,
+  );
+  ordered.sort((left, right) => {
+    if (left.id === selectedId && right.id !== selectedId) return -1;
+    if (right.id === selectedId && left.id !== selectedId) return 1;
     return (
       Number(Boolean(right.scores.meetsQualityThreshold)) -
         Number(Boolean(left.scores.meetsQualityThreshold)) ||
@@ -209,8 +239,40 @@ export function scoreAutoCandidates(
       left.id.localeCompare(right.id)
     );
   });
+  return {
+    ranked: ordered,
+    selected: selectedId ? ordered.find((item) => item.id === selectedId) : undefined,
+  };
+}
+
+export function scoreAutoCandidates(
+  candidates: AutoCandidate[],
+  task: AutoTaskProfile,
+  profile: AutoRouteProfile,
+  currentModel?: string,
+  evidence: RoutingEvidence[] = [],
+  costContextByCandidate: ReadonlyMap<string, CostContext> = new Map(),
+): AutoScoreResult {
+  const evaluated = evaluateEligibleCandidates(
+    candidates,
+    task,
+    currentModel,
+    evidence,
+    costContextByCandidate,
+  );
+  const { eligible, excluded } = evaluated;
+  const ranked = rankEligibleCandidates(eligible, task, profile);
+
+  const { selected, coldStart, coldStartReason } = selectCandidate(ranked, currentModel);
+  const ordered = orderRankedCandidates(ranked, selected, coldStart, coldStartReason);
   excluded.sort((left, right) => left.id.localeCompare(right.id));
-  return { ranked, excluded, selected, coldStart, coldStartReason };
+  return {
+    ranked: ordered.ranked,
+    excluded,
+    selected: ordered.selected,
+    coldStart,
+    coldStartReason,
+  };
 }
 
 export function clampEffort(

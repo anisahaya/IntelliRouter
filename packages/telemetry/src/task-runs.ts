@@ -8,6 +8,8 @@ import {
   type HarnessRouteRecord,
   type LocalEmbedding,
   localEmbeddingSchema,
+  type RoutingEvidence,
+  type RoutingEvidenceQuery,
   reasonCategorySchema,
   reduceEvidence,
   type SafeReceipt,
@@ -74,47 +76,12 @@ export interface ContentPolicy {
   maxTotalBytes?: number;
   retentionDays?: number;
 }
-export interface RoutingEvidenceQuery {
-  taskFingerprint?: string;
-  model?: string;
-  harness?: string;
-  limit?: number;
-}
-export interface RoutingEvidenceRecord {
-  id: string;
-  model: string;
-  taskFingerprint: string;
-  taskType?: string;
-  scope?: string;
-  complexity?: number;
-  risk?: number;
-  capabilities?: string[];
-  repoTags?: string[];
-  label: "correct" | "incorrect";
-  labelStrength: "verified" | "comparative";
+export type RoutingEvidenceRecord = Omit<RoutingEvidence, "origin" | "verification" | "process"> & {
   origin: string;
   verification: string;
   process: string;
-  createdAt: string;
   updatedAt: string;
-  attempts: Array<{
-    attemptOrder: number;
-    model?: string;
-    outcome?: string;
-    retry: boolean;
-    fallback: boolean;
-    inputTokens?: number;
-    outputTokens?: number;
-    tokenBasis: "actual" | "estimated" | "unknown";
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-    costUsd?: number;
-    costBasis: "actual" | "estimated" | "unknown";
-    pricingProvenance?: string;
-    partialWriteDetected: boolean;
-    safeToFallback: boolean;
-  }>;
-}
+};
 
 export interface TaskRunPrivacyPolicy {
   storePrompts?: boolean;
@@ -1270,8 +1237,10 @@ export class TaskRunStore {
        ORDER BY attempt_order ASC,id ASC`,
     );
     return rows.map((row) => {
-      const features = parseObject(row.derived_features_json);
-      const tags = parseStringArray(row.repo_tags_json);
+      const features = parseJSONRecord(row.derived_features_json);
+      const tags = parseJSONArray(row.repo_tags_json).filter(
+        (value): value is string => typeof value === "string",
+      );
       const attemptRows = attemptQuery.all(row.id) as Array<Record<string, unknown>>;
       return {
         id: String(row.id),
@@ -1300,44 +1269,20 @@ export class TaskRunStore {
           outcome: optionalString(attempt.outcome),
           retry: Boolean(attempt.retry),
           fallback: Boolean(attempt.fallback),
-          inputTokens: optionalNumber(attempt.input_tokens),
-          outputTokens: optionalNumber(attempt.output_tokens),
+          inputTokens: finiteNumber(attempt.input_tokens),
+          outputTokens: finiteNumber(attempt.output_tokens),
           tokenBasis: routingMeasurementBasis(attempt.token_basis),
-          cacheReadTokens: optionalNumber(attempt.cache_read_tokens),
-          cacheWriteTokens: optionalNumber(attempt.cache_write_tokens),
-          costUsd: optionalNumber(attempt.cost_usd),
+          cacheReadTokens: finiteNumber(attempt.cache_read_tokens),
+          cacheWriteTokens: finiteNumber(attempt.cache_write_tokens),
+          costUsd: finiteNumber(attempt.cost_usd),
           costBasis: routingMeasurementBasis(attempt.cost_basis),
           pricingProvenance: optionalString(attempt.pricing_provenance, 256),
           partialWriteDetected: Boolean(attempt.partial_write_detected),
           safeToFallback: Boolean(attempt.safe_to_fallback),
         })),
       };
-    });
+    }) as RoutingEvidenceRecord[];
   }
-}
-
-function parseObject(value: unknown): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(String(value ?? "{}"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function parseStringArray(value: unknown): string[] {
-  try {
-    const parsed = JSON.parse(String(value ?? "[]"));
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function optionalString(value: unknown, maximum = Number.POSITIVE_INFINITY): string | undefined {

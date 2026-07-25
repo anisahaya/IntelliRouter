@@ -321,6 +321,40 @@ describe("routing math safety", () => {
     });
   });
 
+  it("classifies a non-retry attempt as first attempt regardless of attempt order", () => {
+    const reordered = evidence("reordered", "correct", {
+      attempts: [
+        {
+          ...evidence("seed").attempts[0]!,
+          attemptOrder: 1,
+          retry: false,
+          fallback: false,
+        },
+      ],
+    });
+    expect(expectedCompletedTaskCost(task, candidate, [reordered])).toMatchObject({
+      components: { firstAttempt: 0.1, retries: 0, escalations: 0 },
+    });
+  });
+
+  it("does not infer observable cache-switch cost without cache-write telemetry", () => {
+    const missingWrite = evidence("missing-cache-write", "correct", {
+      attempts: [
+        {
+          ...evidence("seed").attempts[0]!,
+          attemptOrder: 0,
+          retry: false,
+          fallback: false,
+          cacheWriteTokens: undefined,
+        },
+      ],
+    });
+    expect(observableCacheSwitchCost(task, candidate, [missingWrite])).toBeUndefined();
+    expect(expectedCompletedTaskCost(task, candidate, [missingWrite])).toMatchObject({
+      cacheState: "unknown",
+    });
+  });
+
   it("normalizes economy without inventing distinctions for equal costs", () => {
     expect(normalizeEconomy([1, 3])).toEqual([1, 0]);
     expect(normalizeEconomy([2, 2])).toEqual([0.5, 0.5]);
