@@ -5,6 +5,7 @@ import type { FeedbackEvent, RouteDecision, RouteStats } from "@model-router/con
 import type { ObservedModelMetrics, RouterState } from "@model-router/router-core";
 import Database from "better-sqlite3";
 import { migrate } from "./migrations.js";
+import { type TaskRunPrivacyPolicy, TaskRunStore } from "./task-runs.js";
 
 export interface RequestMetric {
   routeId: string;
@@ -17,6 +18,8 @@ export interface RequestMetric {
   outcome?: "success" | "failure" | "canceled";
   finalModel?: string;
   fallbackCount?: number;
+  tokenBasis?: "actual" | "estimated" | "unknown";
+  costBasis?: "actual" | "estimated" | "unknown";
 }
 
 export interface ProviderAttempt extends RequestMetric {
@@ -35,6 +38,7 @@ interface HealthConfig {
 
 export class TelemetryStore implements RouterState {
   readonly database: Database.Database;
+  readonly taskRuns: TaskRunStore;
   readonly #now: () => number;
   #health: HealthConfig = {
     windowSize: 20,
@@ -43,7 +47,13 @@ export class TelemetryStore implements RouterState {
     cooldownSeconds: 30,
   };
 
-  constructor(path: string, options: { now?: () => number } = {}) {
+  constructor(
+    path: string,
+    options: {
+      now?: () => number;
+      privacy?: TaskRunPrivacyPolicy;
+    } = {},
+  ) {
     this.#now = options.now ?? Date.now;
     if (path !== ":memory:") {
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -58,6 +68,11 @@ export class TelemetryStore implements RouterState {
     }
     this.database.pragma("journal_mode = WAL");
     migrate(this.database);
+    this.taskRuns = new TaskRunStore(this.database, this.sessionSalt(), options.privacy);
+  }
+
+  getSafeReceipt(routeId: string) {
+    return this.taskRuns.receipt(routeId);
   }
 
   close(): void {
@@ -280,6 +295,18 @@ export class TelemetryStore implements RouterState {
           JSON.stringify(candidate.scores),
         );
       }
+      this.taskRuns.createRun({
+        routeId: decision.id,
+        origin: "compatibility",
+        taskFingerprint: this.taskRuns.hmac(
+          TaskRunStore.canonical(decision.features),
+          "task-fingerprint",
+        ),
+        algorithm: "hmac-sha256-v1",
+        selectedModel: decision.logicalModel,
+        profile: decision.profile,
+        derivedFeatures: { ...decision.features, featureSource: "deterministic-router" },
+      });
     })();
   }
 
@@ -324,46 +351,102 @@ export class TelemetryStore implements RouterState {
   }
 
   recordAttempt(attempt: ProviderAttempt): void {
-    this.database
-      .prepare(`INSERT INTO provider_attempts
-      (route_id, attempt_order, model_id, outcome, error_class, status, latency_ms, input_tokens,
-       output_tokens, estimated_cost_usd, provider_request_id, bytes_emitted, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(
-        attempt.routeId,
-        attempt.attemptOrder,
-        attempt.modelId,
-        attempt.outcome ?? "failure",
-        attempt.errorClass ?? null,
-        attempt.status,
-        attempt.latencyMs,
-        attempt.inputTokens ?? 0,
-        attempt.outputTokens ?? 0,
-        attempt.estimatedCostUsd ?? 0,
-        attempt.providerRequestId ?? null,
-        attempt.bytesEmitted ? 1 : 0,
-        new Date().toISOString(),
-      );
+    this.database.transaction(() => {
+      this.database
+        .prepare(`INSERT INTO provider_attempts
+        (route_id, attempt_order, model_id, outcome, error_class, status, latency_ms, input_tokens,
+         output_tokens, estimated_cost_usd, provider_request_id, bytes_emitted, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          attempt.routeId,
+          attempt.attemptOrder,
+          attempt.modelId,
+          attempt.outcome ?? "failure",
+          attempt.errorClass ?? null,
+          attempt.status,
+          attempt.latencyMs,
+          attempt.inputTokens ?? 0,
+          attempt.outputTokens ?? 0,
+          attempt.estimatedCostUsd ?? 0,
+          attempt.providerRequestId ?? null,
+          attempt.bytesEmitted ? 1 : 0,
+          new Date().toISOString(),
+        );
+      this.taskRuns.recordAttempt(attempt.routeId, {
+        attemptOrder: attempt.attemptOrder,
+        model: attempt.modelId,
+        outcome:
+          attempt.outcome === "success"
+            ? "completed"
+            : attempt.outcome === "canceled"
+              ? "canceled"
+              : "failed",
+        retry: attempt.attemptOrder > 1,
+        fallback: attempt.attemptOrder > 1,
+        inputTokens: attempt.inputTokens,
+        outputTokens: attempt.outputTokens,
+        tokenBasis:
+          attempt.tokenBasis ??
+          (attempt.inputTokens !== undefined || attempt.outputTokens !== undefined
+            ? "actual"
+            : "unknown"),
+        latencyMs: attempt.latencyMs,
+        costUsd: attempt.estimatedCostUsd,
+        costBasis:
+          attempt.costBasis ?? (attempt.estimatedCostUsd === undefined ? "unknown" : "estimated"),
+        errorClass: attempt.errorClass,
+        partialWriteDetected: false,
+        safeToFallback: !attempt.bytesEmitted,
+      });
+    })();
   }
 
   recordMetric(metric: RequestMetric): void {
-    this.database
-      .prepare(`INSERT OR REPLACE INTO request_metrics
-        (route_id, status, latency_ms, input_tokens, output_tokens, estimated_cost_usd,
-         provider_request_id, created_at, outcome, final_model, fallback_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(
+    this.database.transaction(() => {
+      this.database
+        .prepare(`INSERT OR REPLACE INTO request_metrics
+          (route_id, status, latency_ms, input_tokens, output_tokens, estimated_cost_usd,
+           provider_request_id, created_at, outcome, final_model, fallback_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          metric.routeId,
+          metric.status,
+          metric.latencyMs,
+          metric.inputTokens ?? 0,
+          metric.outputTokens ?? 0,
+          metric.estimatedCostUsd ?? 0,
+          metric.providerRequestId ?? null,
+          new Date().toISOString(),
+          metric.outcome ?? (metric.status >= 200 && metric.status < 400 ? "success" : "failure"),
+          metric.finalModel ?? null,
+          metric.fallbackCount ?? 0,
+        );
+      this.taskRuns.completeProcess(
         metric.routeId,
-        metric.status,
-        metric.latencyMs,
-        metric.inputTokens ?? 0,
-        metric.outputTokens ?? 0,
-        metric.estimatedCostUsd ?? 0,
-        metric.providerRequestId ?? null,
-        new Date().toISOString(),
-        metric.outcome ?? (metric.status >= 200 && metric.status < 400 ? "success" : "failure"),
-        metric.finalModel ?? null,
-        metric.fallbackCount ?? 0,
+        metric.outcome === "canceled"
+          ? "canceled"
+          : metric.outcome === "failure"
+            ? "failed"
+            : metric.status >= 200 && metric.status < 400
+              ? "completed"
+              : "failed",
+        {
+          latencyMs: metric.latencyMs,
+          inputTokens: metric.inputTokens,
+          outputTokens: metric.outputTokens,
+          tokenBasis:
+            metric.tokenBasis ??
+            (metric.inputTokens !== undefined || metric.outputTokens !== undefined
+              ? "actual"
+              : "unknown"),
+          costUsd: metric.estimatedCostUsd,
+          costBasis:
+            metric.costBasis ?? (metric.estimatedCostUsd === undefined ? "unknown" : "estimated"),
+          retryCount: metric.fallbackCount ?? 0,
+          fallbackCount: metric.fallbackCount ?? 0,
+          finalModel: metric.finalModel,
+        },
       );
+    })();
   }
 
   recordFeedback(event: FeedbackEvent): void {
@@ -371,17 +454,25 @@ export class TelemetryStore implements RouterState {
       .prepare("SELECT 1 FROM route_decisions WHERE id = ?")
       .get(event.routeId);
     if (!exists) throw new Error("route not found");
-    this.database
-      .prepare(
-        "INSERT INTO feedback_events(route_id, outcome, score, tags_json, created_at) VALUES (?, ?, ?, ?, ?)",
-      )
-      .run(
-        event.routeId,
-        event.outcome,
-        event.score ?? null,
-        JSON.stringify(event.tags),
-        new Date().toISOString(),
-      );
+    this.database.transaction(() => {
+      this.database
+        .prepare(
+          "INSERT INTO feedback_events(route_id, outcome, score, tags_json, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(
+          event.routeId,
+          event.outcome,
+          event.score ?? null,
+          JSON.stringify(event.tags),
+          new Date().toISOString(),
+        );
+      this.taskRuns.event(event.routeId, "feedback", {
+        outcome: event.outcome,
+        score: event.score,
+        tags: event.tags,
+        reasonCategory: event.reasonCategory,
+      });
+    })();
   }
 
   getStats(filters: { since?: string; model?: string; task?: string } = {}): RouteStats {

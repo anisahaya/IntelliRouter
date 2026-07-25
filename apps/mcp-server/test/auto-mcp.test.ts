@@ -1,6 +1,7 @@
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RoutingEvidence } from "@model-router/router-core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -44,11 +45,13 @@ describe("auto routing over MCP", () => {
       autoRouter: {
         discovery: { executable: fakeCodex },
         trustedRoot: fixtureRoot,
+        evidenceReader: frontierEvidenceReader,
       },
       codexExec: { executable: fakeCodex, trustedRoot: fixtureRoot },
       harnessRouter: {
         codex: { executable: fakeCodex },
         trustedRoot: fixtureRoot,
+        evidenceReader: frontierEvidenceReader,
         state: {
           path: join(fixtureRoot, "harness-routes.jsonl"),
           env: { ...process.env, MODEL_ROUTER_DATA_DIR: fixtureRoot },
@@ -159,14 +162,133 @@ describe("auto routing over MCP", () => {
         arguments: { routeId: harnessDecision.routeId },
       });
       expect(explained.isError).toBeUndefined();
+      expect(
+        (
+          explained.structuredContent as {
+            receipt: { process: string; verification: string; attemptCount: number };
+          }
+        ).receipt,
+      ).toMatchObject({ process: "completed", verification: "not-run", attemptCount: 1 });
+      const explanation = (
+        explained.structuredContent as {
+          result: {
+            selectionSnapshot: {
+              selectionRule: string;
+              selected: {
+                scores: {
+                  qualityThreshold: number;
+                  evidence: { calibrated: boolean; strength: string };
+                  expectedCost: number;
+                  expectedCostComponents: Record<string, number>;
+                  selectionReason: string;
+                };
+              };
+            };
+          };
+        }
+      ).result.selectionSnapshot;
+      expect(explanation).toMatchObject({
+        selectionRule: "min-expected-cost-subject-to-quality-floor-v1",
+        selected: {
+          scores: {
+            qualityThreshold: expect.any(Number),
+            evidence: { calibrated: false, strength: expect.any(String) },
+            expectedCost: expect.any(Number),
+            expectedCostComponents: expect.any(Object),
+            selectionReason: expect.stringContaining("lowest expected"),
+          },
+        },
+      });
+      const verified = await client.callTool({
+        name: "record_task_run_verification",
+        arguments: {
+          routeId: harnessDecision.routeId,
+          kind: "held-out-test",
+          result: "passed",
+          checkName: "native held-out suite",
+          evidenceHash: "sha256:native",
+        },
+      });
+      expect(verified.isError).toBeUndefined();
+      expect(
+        (
+          verified.structuredContent as {
+            result: { verification: string; labelStrength: string };
+          }
+        ).result,
+      ).toMatchObject({ verification: "passed", labelStrength: "verified" });
       const feedback = await client.callTool({
         name: "submit_harness_feedback",
-        arguments: { routeId: harnessDecision.routeId, outcome: "success" },
+        arguments: {
+          routeId: harnessDecision.routeId,
+          outcome: "reverted",
+          reasonCategory: "correctness",
+          tags: ["regression"],
+        },
       });
       expect(feedback.isError).toBeUndefined();
+      expect(
+        (
+          feedback.structuredContent as {
+            result: {
+              process: string;
+              verification: string;
+              disposition: string;
+              labelValue: string;
+            };
+          }
+        ).result,
+      ).toMatchObject({
+        process: "completed",
+        verification: "passed",
+        disposition: "reverted",
+        labelValue: "correct",
+      });
     } finally {
       await client.close();
       await server.close();
     }
   });
 });
+
+const frontierEvidenceReader = {
+  queryRoutingEvidence(query?: { model?: string }): RoutingEvidence[] {
+    if (query?.model !== "gpt-frontier") return [];
+    return Array.from({ length: 20 }, (_, index) => ({
+      id: `frontier-${index}`,
+      model: "gpt-frontier",
+      taskFingerprint: `frontier-task-${index}`,
+      taskType: "implementation",
+      scope: "multi",
+      complexity: 0.7,
+      risk: 0.42,
+      capabilities: ["tools", "edit"],
+      repoTags: ["package.json"],
+      label: "correct",
+      labelStrength: "verified",
+      origin: "native",
+      verification: "passed",
+      process: "completed",
+      createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+      attempts: [
+        {
+          attemptOrder: 0,
+          model: "gpt-frontier",
+          outcome: "completed",
+          retry: false,
+          fallback: false,
+          inputTokens: 100,
+          outputTokens: 20,
+          tokenBasis: "actual",
+          cacheReadTokens: 10,
+          cacheWriteTokens: 0,
+          costUsd: 0.4,
+          costBasis: "actual",
+          pricingProvenance: "observed-receipt",
+          partialWriteDetected: false,
+          safeToFallback: true,
+        },
+      ],
+    }));
+  },
+};

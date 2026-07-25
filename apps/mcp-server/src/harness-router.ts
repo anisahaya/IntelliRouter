@@ -6,7 +6,11 @@ import type {
   HarnessId,
   RegisteredAgent,
 } from "@model-router/contracts";
-import { buildAutoTaskProfile, scoreAutoCandidates } from "@model-router/router-core";
+import {
+  buildAutoTaskProfile,
+  type RoutingEvidenceReader,
+  scoreAutoCandidates,
+} from "@model-router/router-core";
 import { type ClaudeDiscoveryOptions, discoverClaudeModels } from "./claude-cli.js";
 import { type CodexDiscoveryOptions, discoverCodexModels } from "./codex-cli.js";
 import { assertRootInvocation, sanitizeText } from "./context-security.js";
@@ -20,6 +24,7 @@ import {
   type RouteStateOptions,
   routeIdentity,
 } from "./route-state.js";
+import { cacheSwitchContexts, readRoutingEvidence } from "./routing-evidence.js";
 import { resolveTrustedWorkspace } from "./workspace-security.js";
 
 export interface HarnessRouteInput {
@@ -43,6 +48,7 @@ export interface HarnessRouterOptions {
   state?: RouteStateOptions;
   env?: NodeJS.ProcessEnv;
   trustedRoot?: string;
+  evidenceReader?: RoutingEvidenceReader;
 }
 
 export async function routeHarnessTask(
@@ -70,7 +76,6 @@ export async function routeHarnessTask(
     throw new Error("current model does not match the live Codex catalog");
   }
   const profile = input.profile ?? "balanced";
-  const { ranked, excluded } = scoreAutoCandidates(candidates, taskProfile, profile, fallbackModel);
   const identity = routeIdentity({
     harness: input.harness,
     sessionId: input.sessionId,
@@ -79,33 +84,53 @@ export async function routeHarnessTask(
     requirements: input.requirements,
   });
   const execution = executionFor(input.harness);
-  if (!input.forceReroute) {
-    const affinity = await findAffinity(input.harness, identity, {
-      ...options.state,
-      env,
-    });
-    if (affinity) {
-      const reused = affinityDecision({
-        record: affinity,
-        candidates: ranked,
-        taskProfile,
-        repoSignals,
-        profile,
-        context: {
-          objectiveTruncated: objective.truncated,
-          conversationTruncated: conversation.truncated,
-        },
-        fallbackModel,
-        execution,
+  const affinity = input.forceReroute
+    ? undefined
+    : await findAffinity(input.harness, identity, {
+        ...options.state,
+        env,
       });
-      if (reused) {
-        reused.sessionId = input.sessionId;
-        await persistDecision(reused, identity, { ...options.state, env });
-        return reused;
-      }
+  const evidenceReader = options.evidenceReader ?? options.state?.telemetryStore?.taskRuns;
+  const evidence = readRoutingEvidence(
+    evidenceReader as RoutingEvidenceReader | undefined,
+    candidates,
+    input.harness,
+  );
+  const cacheCosts = cacheSwitchContexts(
+    taskProfile,
+    candidates,
+    evidence,
+    affinity?.selectedCandidate ?? fallbackModel,
+  );
+  const { ranked, excluded, selected, coldStart, coldStartReason } = scoreAutoCandidates(
+    candidates,
+    taskProfile,
+    profile,
+    fallbackModel,
+    evidence,
+    cacheCosts,
+  );
+  if (affinity) {
+    const reused = affinityDecision({
+      record: affinity,
+      candidates: ranked,
+      taskProfile,
+      repoSignals,
+      profile,
+      context: {
+        objectiveTruncated: objective.truncated,
+        conversationTruncated: conversation.truncated,
+      },
+      fallbackModel,
+      execution,
+    });
+    if (reused) {
+      reused.sessionId = input.sessionId;
+      await persistDecision(reused, identity, { ...options.state, env });
+      return reused;
     }
   }
-  const winner = ranked[0];
+  const winner = selected;
   const decision: AutoRouteDecision = {
     routeId: newRouteId(),
     harness: input.harness,
@@ -132,6 +157,9 @@ export async function routeHarnessTask(
       objectiveTruncated: objective.truncated,
       conversationTruncated: conversation.truncated,
     },
+    selectionRule: "min-expected-cost-subject-to-quality-floor-v1",
+    coldStart,
+    coldStartReason,
   };
   await persistDecision(decision, identity, { ...options.state, env });
   return decision;

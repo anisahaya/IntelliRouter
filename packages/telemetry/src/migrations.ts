@@ -110,6 +110,142 @@ const migrations = [
   `
     ALTER TABLE model_health_windows ADD COLUMN window_start_attempt_id INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+    CREATE TABLE IF NOT EXISTS task_runs (
+      id TEXT PRIMARY KEY,
+      route_id TEXT NOT NULL UNIQUE,
+      origin TEXT NOT NULL,
+      schema_version INTEGER NOT NULL DEFAULT 1,
+      receipt_version INTEGER NOT NULL DEFAULT 1,
+      task_fingerprint TEXT NOT NULL,
+      workspace_fingerprint TEXT,
+      algorithm TEXT NOT NULL DEFAULT 'hmac-sha256-v1',
+      derived_features_json TEXT NOT NULL DEFAULT '{}',
+      repo_tags_json TEXT NOT NULL DEFAULT '[]',
+      selected_model TEXT,
+      effort TEXT,
+      harness TEXT,
+      profile TEXT,
+      context_json TEXT NOT NULL DEFAULT '{}',
+      cache_json TEXT NOT NULL DEFAULT '{}',
+      process TEXT NOT NULL,
+      verification TEXT NOT NULL,
+      disposition TEXT NOT NULL,
+      label_value TEXT NOT NULL,
+      label_strength TEXT NOT NULL,
+      source_id TEXT,
+      partial_write_detected INTEGER NOT NULL DEFAULT 0,
+      safe_to_fallback INTEGER NOT NULL DEFAULT 1,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      cache_read_tokens INTEGER,
+      cache_write_tokens INTEGER,
+      token_basis TEXT NOT NULL DEFAULT 'unknown',
+      latency_ms REAL,
+      cost_usd REAL,
+      cost_basis TEXT NOT NULL DEFAULT 'unknown',
+      pricing_provenance TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      fallback_count INTEGER NOT NULL DEFAULT 0,
+      process_completed_at TEXT,
+      verification_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS task_run_attempts (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      attempt_order INTEGER NOT NULL,
+      model TEXT,
+      harness TEXT,
+      effort TEXT,
+      outcome TEXT NOT NULL,
+      retry INTEGER NOT NULL DEFAULT 0,
+      fallback INTEGER NOT NULL DEFAULT 0,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      token_basis TEXT NOT NULL DEFAULT 'unknown',
+      cache_read_tokens INTEGER,
+      cache_write_tokens INTEGER,
+      latency_ms REAL,
+      cost_usd REAL,
+      cost_basis TEXT NOT NULL DEFAULT 'unknown',
+      pricing_provenance TEXT,
+      error_class TEXT,
+      partial_write_detected INTEGER NOT NULL DEFAULT 0,
+      safe_to_fallback INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      UNIQUE(run_id, attempt_order)
+    );
+    CREATE TABLE IF NOT EXISTS task_run_verifications (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      result TEXT NOT NULL,
+      check_name_hmac TEXT NOT NULL,
+      latency_ms REAL,
+      evidence_hash TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS task_run_events (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS task_run_content (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      content TEXT NOT NULL,
+      original_hmac TEXT NOT NULL,
+      redaction_version TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      stored_bytes INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS task_run_embeddings (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
+      model TEXT NOT NULL,
+      normalized INTEGER NOT NULL DEFAULT 0,
+      dimensions INTEGER NOT NULL CHECK(dimensions BETWEEN 1 AND 4096),
+      values_blob BLOB NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(run_id, model)
+    );
+    CREATE TABLE IF NOT EXISTS dataset_imports (
+      id TEXT PRIMARY KEY,
+      provenance TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      license TEXT NOT NULL,
+      canonical_uri TEXT,
+      model_pair_json TEXT NOT NULL,
+      label_semantics TEXT NOT NULL,
+      manifest_hmac TEXT NOT NULL UNIQUE,
+      record_count INTEGER NOT NULL DEFAULT 0,
+      imported_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS dataset_import_records (
+      import_id TEXT NOT NULL REFERENCES dataset_imports(id) ON DELETE CASCADE,
+      external_id_hmac TEXT NOT NULL,
+      route_id TEXT NOT NULL REFERENCES task_runs(route_id) ON DELETE CASCADE,
+      label TEXT NOT NULL,
+      strength TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(import_id, external_id_hmac)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_runs_fingerprint ON task_runs(task_fingerprint);
+    CREATE INDEX IF NOT EXISTS idx_task_runs_created ON task_runs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_task_runs_model_harness ON task_runs(selected_model, harness, created_at);
+    CREATE INDEX IF NOT EXISTS idx_task_runs_label ON task_runs(label_strength, verification, created_at);
+    CREATE INDEX IF NOT EXISTS idx_task_runs_source ON task_runs(source_id);
+    CREATE INDEX IF NOT EXISTS idx_task_attempts_run ON task_run_attempts(run_id, attempt_order);
+    CREATE INDEX IF NOT EXISTS idx_task_verifications_run ON task_run_verifications(run_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_task_events_run ON task_run_events(run_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_task_embeddings_model ON task_run_embeddings(model, dimensions);
+  `,
 ];
 
 export function migrate(database: Database.Database): void {

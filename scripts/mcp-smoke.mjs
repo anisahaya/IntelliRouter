@@ -13,7 +13,8 @@ const client = new Client({ name: "model-router-smoke", version: "0.1.0" });
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 12);
+  assert.equal(tools.tools.length, 13);
+  assert.ok(tools.tools.some((tool) => tool.name === "record_task_run_verification"));
   assert.ok(tools.tools.some((tool) => tool.name === "route_harness_task"));
   assert.ok(tools.tools.some((tool) => tool.name === "delegate_harness_task"));
   assert.ok(tools.tools.some((tool) => tool.name === "explain_harness_route"));
@@ -30,6 +31,12 @@ try {
   });
   const routeId = route.structuredContent.routeId;
   await call("explain_route", { routeId });
+  await call("record_task_run_verification", {
+    routeId,
+    kind: "public-test",
+    result: "passed",
+    checkName: "mcp-smoke",
+  });
   await call("router_stats", {});
   await call("submit_route_feedback", { routeId, outcome: "success", tags: ["smoke"] });
   await call("list_router_models", {});
@@ -39,7 +46,9 @@ try {
   });
   assert.equal(delegated.structuredContent.result.text, "mock");
   assert.equal(delegated.structuredContent.result.fallbackCount, 0);
-  process.stdout.write("mcp smoke: 12 tools registered and legacy proxy flow passed over stdio\n");
+  process.stdout.write(
+    "mcp smoke: 13 tools registered and proxy verification flow passed over stdio\n",
+  );
 } finally {
   await client.close();
   await harness.close();

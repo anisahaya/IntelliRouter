@@ -43,7 +43,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       throw new Error(`enabled model ${model.id} uses placeholder provider configuration`);
     }
   }
-  const store = options.store ?? new TelemetryStore(config.server.databasePath);
+  const store =
+    options.store ??
+    new TelemetryStore(config.server.databasePath, {
+      privacy: config.privacy,
+    });
+  store.taskRuns.configurePrivacy(config.privacy);
   store.configureHealth(config.routing.health);
   const engine = new RoutingEngine(
     config,

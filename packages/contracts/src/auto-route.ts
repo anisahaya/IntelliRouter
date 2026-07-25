@@ -89,6 +89,10 @@ export const autoCandidateSchema = z.object({
   quality: z.number().min(0).max(1),
   speed: z.number().min(0).max(1),
   economy: z.number().min(0).max(1),
+  expectedCost: z.number().nonnegative().optional(),
+  costUnit: z.enum(["usd", "tokens"]).optional(),
+  costBasis: z.enum(["observed", "estimated", "catalog", "unknown"]).optional(),
+  costProvenance: z.string().min(1).max(256).optional(),
   supportedEfforts: z.array(reasoningEffortSchema).optional(),
 });
 export type AutoCandidate = z.infer<typeof autoCandidateSchema>;
@@ -101,10 +105,57 @@ export const autoRankedCandidateSchema = z.object({
   scores: z.object({
     taskFit: z.number(),
     quality: z.number(),
+    qualityHeuristic: z.number().min(0).max(1).optional(),
     speed: z.number(),
     economy: z.number(),
     specialization: z.number(),
     total: z.number(),
+    qualityThreshold: z.number().min(0).max(1).optional(),
+    estimatedVerifiedSuccess: z.number().min(0).max(1).optional(),
+    conservativeSuccess: z.number().min(0).max(1).optional(),
+    meetsQualityThreshold: z.boolean().optional(),
+    evidence: z
+      .object({
+        rawCount: z.number().int().nonnegative(),
+        neighborCount: z.number().int().nonnegative(),
+        effectiveCount: z.number().nonnegative(),
+        priorOnly: z.boolean(),
+        calibrated: z.literal(false),
+        strength: z.enum(["prior-only", "sparse", "moderate", "strong"]),
+        priorAlpha: z.literal(2),
+        priorBeta: z.literal(2),
+        similarityRange: z.tuple([z.number(), z.number()]).optional(),
+      })
+      .optional(),
+    expectedCost: z.number().nonnegative().optional(),
+    expectedCostUnit: z.enum(["usd", "tokens"]).optional(),
+    expectedCostBasis: z
+      .enum(["observed", "estimated", "mixed", "unknown", "catalog-fallback"])
+      .optional(),
+    expectedCostComparable: z.boolean().optional(),
+    expectedCostComponents: z
+      .object({
+        firstAttempt: z.number().nonnegative(),
+        retries: z.number().nonnegative(),
+        escalations: z.number().nonnegative(),
+        cacheSwitch: z.number().nonnegative(),
+        routingOverhead: z.number().nonnegative(),
+        verification: z.number().nonnegative(),
+      })
+      .optional(),
+    expectedCostComponentBasis: z
+      .object({
+        firstAttempt: z.enum(["observed", "estimated", "mixed", "unknown"]),
+        retries: z.enum(["observed", "estimated", "mixed", "unknown"]),
+        escalations: z.enum(["observed", "estimated", "mixed", "unknown"]),
+        cacheSwitch: z.enum(["observed", "estimated", "mixed", "unknown"]),
+        routingOverhead: z.enum(["observed", "estimated", "mixed", "unknown"]),
+        verification: z.enum(["observed", "estimated", "mixed", "unknown"]),
+      })
+      .optional(),
+    pricingProvenance: z.array(z.string().max(256)).max(32).optional(),
+    cacheState: z.enum(["observed", "unknown"]).optional(),
+    selectionReason: z.string().optional(),
   }),
 });
 export type AutoRankedCandidate = z.infer<typeof autoRankedCandidateSchema>;
@@ -136,6 +187,9 @@ export const autoRouteDecisionSchema = z.object({
     harness: harnessIdSchema.optional(),
   }),
   context: z.object({ objectiveTruncated: z.boolean(), conversationTruncated: z.boolean() }),
+  selectionRule: z.literal("min-expected-cost-subject-to-quality-floor-v1").optional(),
+  coldStart: z.boolean().optional(),
+  coldStartReason: z.string().optional(),
 });
 export type AutoRouteDecision = z.infer<typeof autoRouteDecisionSchema>;
 
@@ -156,10 +210,22 @@ export const harnessRouteRecordSchema = z.object({
   featureSummary: z.object({
     taskType: z.string(),
     complexity: z.number(),
+    ambiguity: z.number().optional(),
     risk: z.number(),
+    mechanical: z.number().optional(),
     scope: z.string(),
     requiredCapabilities: z.array(z.string()),
+    estimatedContextTokens: z.number().int().nonnegative().optional(),
+    repoTags: z.array(z.string()).optional(),
   }),
+  selectionSnapshot: z
+    .object({
+      selectionRule: z.literal("min-expected-cost-subject-to-quality-floor-v1"),
+      coldStart: z.boolean(),
+      coldStartReason: z.string().optional(),
+      selected: autoRankedCandidateSchema.optional(),
+    })
+    .optional(),
   partialWriteDetected: z.boolean().default(false),
 });
 export type HarnessRouteRecord = z.infer<typeof harnessRouteRecordSchema>;

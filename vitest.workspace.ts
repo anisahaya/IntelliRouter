@@ -34,6 +34,8 @@ export default defineConfig({
         .pathname,
       "@model-router/telemetry": new URL("./packages/telemetry/src/index.ts", import.meta.url)
         .pathname,
+      "@model-router/evaluation": new URL("./packages/evaluation/src/index.ts", import.meta.url)
+        .pathname,
     },
   },
 });

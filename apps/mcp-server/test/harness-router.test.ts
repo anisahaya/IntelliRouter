@@ -1,6 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RoutingEvidence } from "@model-router/router-core";
 import { describe, expect, it } from "vitest";
 import type { ClaudeCommandRunner } from "../src/claude-cli.js";
 import { routeHarnessTask } from "../src/harness-router.js";
@@ -56,6 +57,7 @@ describe("harness-neutral routing", () => {
       opencode: { runner: discovery },
       repo: { runner: repo },
       state,
+      evidenceReader: terraEvidenceReader,
     });
     expect(first).toMatchObject({
       harness: "opencode",
@@ -77,10 +79,21 @@ describe("harness-neutral routing", () => {
       opencode: { runner: discovery },
       repo: { runner: repo },
       state,
+      evidenceReader: terraEvidenceReader,
     });
     expect(second.affinityReused).toBe(true);
     expect(second.selected?.id).toBe(first.selected?.id);
     expect(second.routeId).not.toBe(first.routeId);
+    expect(second.ranked[0]?.scores.selectionReason).toContain("session affinity reused");
+
+    const evidenceMissing = await routeHarnessTask(input, {
+      opencode: { runner: discovery },
+      repo: { runner: repo },
+      state,
+      evidenceReader: { queryRoutingEvidence: () => [] },
+    });
+    expect(evidenceMissing.affinityReused).toBe(false);
+    expect(evidenceMissing.coldStart).toBe(true);
 
     const changedRequirements = await routeHarnessTask(
       { ...input, requirements: { ...input.requirements, vision: true } },
@@ -88,6 +101,7 @@ describe("harness-neutral routing", () => {
         opencode: { runner: discovery },
         repo: { runner: repo },
         state,
+        evidenceReader: terraEvidenceReader,
       },
     );
     expect(changedRequirements.affinityReused).toBe(false);
@@ -129,3 +143,45 @@ describe("harness-neutral routing", () => {
     });
   });
 });
+
+const terraEvidenceReader = {
+  queryRoutingEvidence(query: { model?: string }): RoutingEvidence[] {
+    if (query.model !== "openai/gpt-5.6-terra") return [];
+    return Array.from({ length: 8 }, (_, index) => ({
+      id: `terra-${index}`,
+      model: "openai/gpt-5.6-terra",
+      taskFingerprint: `terra-task-${index}`,
+      taskType: "implementation",
+      scope: "multi",
+      complexity: 0.6,
+      risk: 0.1,
+      capabilities: ["tools", "edit"],
+      repoTags: ["typescript"],
+      label: "correct",
+      labelStrength: "verified",
+      origin: "native",
+      verification: "passed",
+      process: "completed",
+      createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+      attempts: [
+        {
+          attemptOrder: 0,
+          model: "openai/gpt-5.6-terra",
+          outcome: "completed",
+          retry: false,
+          fallback: false,
+          inputTokens: 100,
+          outputTokens: 20,
+          tokenBasis: "actual",
+          cacheReadTokens: 10,
+          cacheWriteTokens: 0,
+          costUsd: 0.2,
+          costBasis: "actual",
+          pricingProvenance: "observed-receipt",
+          partialWriteDetected: false,
+          safeToFallback: true,
+        },
+      ],
+    }));
+  },
+};

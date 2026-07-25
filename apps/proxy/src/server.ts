@@ -5,9 +5,14 @@ import { buildApp } from "./app.js";
 export async function startServer(configPath?: string): Promise<void> {
   const config = await loadConfig(configPath);
   const app = await buildApp({ config });
-  if (config.privacy.storePrompts || config.privacy.storeResponses) {
+  if (
+    config.privacy.storePrompts ||
+    config.privacy.storeResponses ||
+    config.privacy.storeSource ||
+    config.privacy.storeEmbeddings
+  ) {
     app.log.warn(
-      "raw-content storage was requested but is not implemented in v0.1; content remains disabled",
+      "opt-in task content or embedding storage was requested; automatic runtime capture remains disabled and only explicit bounded task-run APIs can persist it",
     );
   }
   const address = await app.listen({ host: config.server.host, port: config.server.port });

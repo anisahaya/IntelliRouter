@@ -16,7 +16,8 @@
       "@model-router/config": ["./packages/config/src/index.ts"],
       "@model-router/router-core": ["./packages/router-core/src/index.ts"],
       "@model-router/providers": ["./packages/providers/src/index.ts"],
-      "@model-router/telemetry": ["./packages/telemetry/src/index.ts"]
+      "@model-router/telemetry": ["./packages/telemetry/src/index.ts"],
+      "@model-router/evaluation": ["./packages/evaluation/src/index.ts"]
     }
   }
 }

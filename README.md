@@ -63,7 +63,19 @@ portable skill -> route_harness_task -> signed-in harness models + exposed agent
                 +-> current model fallback
 ```
 
-Required tools, vision, search, editing, and context size are hard filters. The selected profile then compares deterministic task fit, quality, speed, economy, and specialization. Exact ties break by candidate ID. The current model is excluded from ranking so it remains a genuine fallback.
+Required tools, vision, search, editing, policy, and context size remain hard filters. The
+Balanced diagnostic profile is provisionally
+`0.38 taskFit + 0.32 qualityHeuristic + 0.10 speed + 0.20 economy`. Selection is stricter than
+that explanatory score: among routes whose cautious, non-calibrated estimate of verified success
+clears the task-risk floor, the router chooses the lowest comparable expected completed-task cost.
+The current model stays reserved as a genuine cold-start and safety fallback.
+
+Completed-task cost can include observed attempts, retries, escalation, cache-write/switch cost,
+routing overhead, and objective verification. Each component reports whether it is observed,
+estimated, or unknown. The router never converts tokens to dollars without trusted pricing
+provenance and never compares different cost units. See
+[Routing math and safety](docs/routing-math.md) for the equations, evidence bounds, cold-start
+behavior, and verify-then-escalate limits.
 
 Only the context needed for a bounded objective is delegated. The router never reads source contents to choose a model. It uses language/file counts, manifest names, test presence, and aggregate Git changes; ignores dependencies, build output, `.env*`, and symlinks; redacts common credential shapes; and caps all inputs and child outputs.
 
@@ -127,7 +139,11 @@ Native delegation defaults to 120 seconds for small or mechanical work and 300 s
 
 ### Privacy and security
 
-SQLite stores route features, approximate token counts, scores, aliases, latency, status, cost estimates, HMAC-hashed session IDs, provider attempts, and explicit feedback. Raw prompt/response storage and unhashed sessions are rejected because those modes are not safely implemented in v0.1. Logs redact authorization, API key, cookie, credential, token, password, and secret-shaped fields.
+SQLite stores route features, approximate token counts, scores, aliases, latency, status, cost estimates, HMAC-hashed session IDs, provider attempts, and explicit feedback. Raw content capture is disabled by default and only available through bounded, opt-in APIs; unhashed sessions remain rejected. Logs redact authorization, API key, cookie, credential, token, password, and secret-shaped fields.
+
+Task-run records extend this telemetry with process/verification state and safe receipts. Source, raw content, and embeddings remain opt-in and bounded by privacy settings (`storeSource`, `storeEmbeddings`, and content byte/retention caps). Automatic runtime capture is not implemented; only explicit bounded task-run APIs can persist these values.
+
+The versioned record, label-strength rules, public seed import boundary, and hidden historical-commit evaluation interface are documented in [`docs/training-data.md`](docs/training-data.md). This infrastructure does not implement learned or nearest-neighbor routing.
 
 ### CLI
 

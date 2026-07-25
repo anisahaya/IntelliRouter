@@ -23,6 +23,28 @@ describe("router config", () => {
     const config = routerConfigSchema.parse(base);
     expect(config.server.host).toBe("127.0.0.1");
     expect(config.privacy.storePrompts).toBe(false);
+    expect(config.privacy.storeResponses).toBe(false);
+    expect(config.privacy.storeSource).toBe(false);
+    expect(config.privacy.storeEmbeddings).toBe(false);
+    expect(config.privacy.contentMaxItemBytes).toBeLessThanOrEqual(
+      config.privacy.contentMaxRunBytes,
+    );
+    expect(config.privacy.contentMaxRunBytes).toBeLessThanOrEqual(
+      config.privacy.contentMaxTotalBytes,
+    );
+  });
+
+  it("rejects privacy byte caps that are not item <= run <= total", () => {
+    expect(() =>
+      routerConfigSchema.parse({
+        ...base,
+        privacy: {
+          contentMaxItemBytes: 200,
+          contentMaxRunBytes: 100,
+          contentMaxTotalBytes: 1_000,
+        },
+      }),
+    ).toThrow(/content byte caps/);
   });
 
   it("rejects duplicate model IDs", () => {
