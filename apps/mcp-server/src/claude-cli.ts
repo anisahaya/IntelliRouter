@@ -1,11 +1,9 @@
-import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
 import { parseBoundedJSON } from "@model-router/telemetry";
+import { captureCommand } from "./command.js";
 
-const execFileAsync = promisify(execFile);
 const defaultAliases = ["opus", "sonnet", "haiku"];
 
 export interface ClaudeCommandRunner {
@@ -149,7 +147,7 @@ function discoveryEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 const systemRunner: ClaudeCommandRunner = {
   async execFile(file, args, options) {
-    const result = await execFileAsync(file, args, options);
+    const result = await captureCommand(file, args, options);
     return { stdout: result.stdout };
   },
 };

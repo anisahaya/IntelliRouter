@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
+import { runCommand } from "./command.js";
 import { ensureSkill, type InstalledAssets } from "./setup-shared.js";
-
-const execFileAsync = promisify(execFile);
 
 export async function setupCodex(
   assets: InstalledAssets,
@@ -27,8 +24,8 @@ export async function setupCodex(
       skill,
     };
   }
-  if (existing && force) await execFileAsync("codex", ["mcp", "remove", "model-router"]);
-  await execFileAsync("codex", ["mcp", "add", "model-router", "--", process.execPath, assets.mcp]);
+  if (existing && force) await runCommand("codex", ["mcp", "remove", "model-router"]);
+  await runCommand("codex", ["mcp", "add", "model-router", "--", process.execPath, assets.mcp]);
   return { harness: "codex", configured: true, changed: true, auth: "host-native", skill };
 }
 
@@ -54,9 +51,9 @@ export async function setupClaude(
     };
   }
   if (existing && force) {
-    await execFileAsync("claude", ["mcp", "remove", "--scope", "user", "model-router"]);
+    await runCommand("claude", ["mcp", "remove", "--scope", "user", "model-router"]);
   }
-  await execFileAsync("claude", claudeMcpAddArgs(assets.mcp));
+  await runCommand("claude", claudeMcpAddArgs(assets.mcp));
   return {
     harness: "claude-code",
     configured: true,
@@ -72,10 +69,10 @@ export function claudeMcpAddArgs(mcpPath: string, nodePath = process.execPath): 
 
 async function codexMcpEntry(): Promise<unknown | undefined> {
   try {
-    const result = await execFileAsync("codex", ["mcp", "get", "model-router", "--json"], {
+    const result = await runCommand("codex", ["mcp", "get", "model-router", "--json"], {
       timeout: 10_000,
     });
-    return JSON.parse(result.stdout);
+    return JSON.parse(result);
   } catch {
     return undefined;
   }
@@ -83,8 +80,7 @@ async function codexMcpEntry(): Promise<unknown | undefined> {
 
 async function claudeMcpEntry(): Promise<string | undefined> {
   try {
-    return (await execFileAsync("claude", ["mcp", "get", "model-router"], { timeout: 10_000 }))
-      .stdout;
+    return await runCommand("claude", ["mcp", "get", "model-router"], { timeout: 10_000 });
   } catch {
     return undefined;
   }

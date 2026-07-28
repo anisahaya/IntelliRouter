@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type {
   AutoRouteDecision,
@@ -32,16 +33,10 @@ interface StoreLease {
 function acquireStore(options: RouteStateOptions): StoreLease {
   if (options.telemetryStore) return { store: options.telemetryStore, owned: false };
   const env = options.env ?? process.env;
-  const home = env.HOME;
-  const dataRoot = env.MODEL_ROUTER_DATA_DIR ?? (home ? join(home, ".model-router") : undefined);
+  const home = env.HOME ?? env.USERPROFILE ?? homedir();
+  const dataRoot = env.MODEL_ROUTER_DATA_DIR ?? join(home, ".model-router");
   const path =
-    options.databasePath ??
-    env.MODEL_ROUTER_DATABASE_PATH ??
-    (dataRoot ? join(dataRoot, "router.db") : undefined);
-  if (!path)
-    throw new Error(
-      "HOME, MODEL_ROUTER_DATA_DIR, MODEL_ROUTER_DATABASE_PATH, or databasePath is required",
-    );
+    options.databasePath ?? env.MODEL_ROUTER_DATABASE_PATH ?? join(dataRoot, "router.db");
   return { store: new TelemetryStore(path), owned: true };
 }
 
@@ -186,7 +181,7 @@ export async function updateRouteOutcome(
     ...current,
     updatedAt: new Date().toISOString(),
     outcome,
-    rerouteReason: sanitizeReason(input.rerouteReason),
+    rerouteReason: sanitizeReason(input.rerouteReason, options.env),
     partialWriteDetected: input.partialWriteDetected ?? current.partialWriteDetected,
   };
   await appendRecord(updated, options);
@@ -450,14 +445,14 @@ const SECRET_PATTERN = /\b(?:sk|ghp|github_pat|xox[abprs]|key-|bearer)[-._~+\\/A
 const REDACTION_PAIR_PATTERN =
   /(["'](?:token|secret|password|credential|api[_-]?key|authorization)["']\s*:\s*["'])[^"']+(["'])/gi;
 
-function sanitizeReason(value?: string): string | undefined {
+function sanitizeReason(value?: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
   if (!value) return undefined;
   let safe = value
     .slice(0, 512)
     .replace(SECRET_PATTERN, "[REDACTED]")
     .replace(REDACTION_PAIR_PATTERN, "$1[REDACTED]$2");
-  if (process.env.HOME && process.env.HOME.length > 2)
-    safe = safe.split(process.env.HOME).join("~");
+  const home = env.HOME ?? env.USERPROFILE ?? homedir();
+  if (home.length > 2) safe = safe.split(home).join("~");
   return safe;
 }
 
@@ -541,8 +536,7 @@ function statePath(options: RouteStateOptions): string {
       `MODEL_ROUTER_STATE_PATH "${resolved}" is outside the model router data directory (${dataRoot})`,
     );
   }
-  const home = env.HOME;
-  if (!home) throw new Error("HOME or MODEL_ROUTER_STATE_PATH is required for route persistence");
+  const home = env.HOME ?? env.USERPROFILE ?? homedir();
   return join(home, ".model-router", "harness-routes.jsonl");
 }
 

@@ -11,8 +11,16 @@ import { serve } from "./serve.js";
 import { setupHarness } from "./setup.js";
 import { getStats } from "./stats.js";
 
+const invokedAs = process.argv[1]?.toLowerCase().split(/[\\/]/).pop() ?? "";
+if (
+  process.env.INTELLIROUTER_LEGACY_ALIAS === "1" ||
+  invokedAs === "model-router" ||
+  invokedAs === "model-router.js"
+) {
+  process.stderr.write("Warning: model-router is deprecated; use intellirouter instead.\n");
+}
 const program = new Command()
-  .name("model-router")
+  .name("intellirouter")
   .description("Local, harness-aware model router")
   .version("0.1.0");
 program
@@ -24,16 +32,17 @@ program
   .option("--config <path>")
   .option("--probe")
   .option("--harness <harness>", "codex, opencode, claude-code, pi, or all")
+  .option("--strict", "require every selected harness to pass")
   .action(async (options) =>
     print(
       options.harness
-        ? await nativeDoctor(options.harness)
+        ? await nativeDoctor(options.harness, Boolean(options.strict))
         : await doctor(options.config, options.probe),
     ),
   );
 program
   .command("setup")
-  .option("--harness <harness>", "codex, opencode, claude-code, pi, or all", "all")
+  .option("--harness <harness>", "codex, opencode, claude-code, pi, or all", "codex")
   .option("--force", "replace an existing Codex MCP entry")
   .option("--opencode-config <path>", "override the OpenCode config path")
   .action(async (options) =>

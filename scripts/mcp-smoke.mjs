@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { startHarness } from "./test-harness.mjs";
@@ -6,7 +7,7 @@ import { startHarness } from "./test-harness.mjs";
 const harness = await startHarness();
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: [new URL("../dist/mcp-server/index.js", import.meta.url).pathname],
+  args: [fileURLToPath(new URL("../dist/mcp-server/index.js", import.meta.url))],
   env: { ...process.env, MODEL_ROUTER_BASE_URL: harness.baseUrl },
 });
 const client = new Client({ name: "model-router-smoke", version: "0.1.0" });

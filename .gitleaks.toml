@@ -1,0 +1,4 @@
+[allowlist]
+description = "Synthetic credential strings used only by the redaction test"
+paths = ['^apps/proxy/test/proxy\\.test\\.ts$']
+regexes = ['key-ghp_abcdef1234567890', 'Bearer xoxb-123456789012345']

@@ -1,7 +1,8 @@
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
 import { join } from "node:path";
 import type { ReasoningEffort, RepoSignals } from "@model-router/contracts";
 import { parseBoundedJSON } from "@model-router/telemetry";
+import { spawnCommand } from "./command.js";
 import {
   assertRootInvocation,
   boundedOutput,
@@ -114,7 +115,7 @@ export async function executeOpenCodeTask(
     prompt,
   ];
   const childEnv = childEnvironment(sourceEnv, input.permission, Boolean(input.searchRequired));
-  const spawnProcess = options.spawnProcess ?? spawn;
+  const spawnProcess = (options.spawnProcess ?? spawnCommand) as typeof spawn;
   if (input.permission === "workspace-write") workspaceLocks.add(workspaceRoot);
   try {
     await revalidateTrustedWorkspace(workspaceRoot, options.trustedRoot);
@@ -296,6 +297,14 @@ function extractSessionId(output: string): string | undefined {
 }
 
 function terminateChild(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  if (process.platform === "win32" && child.pid) {
+    try {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+    } catch {
+      /* exited */
+    }
+    return;
+  }
   if (process.platform !== "win32" && child.pid) {
     try {
       process.kill(-child.pid, signal);

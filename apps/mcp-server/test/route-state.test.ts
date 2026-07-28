@@ -128,6 +128,36 @@ describe("harness route state", () => {
     );
   });
 
+  it("redacts a Windows user profile from persisted reroute reasons", async () => {
+    const root = await mkdtemp(join(tmpdir(), "model-router-state-windows-home-"));
+    const windowsHome = String.raw`C:\Users\alice`;
+    const options = {
+      path: join(root, "routes.jsonl"),
+      env: {
+        ...process.env,
+        HOME: undefined,
+        USERPROFILE: windowsHome,
+        MODEL_ROUTER_DATA_DIR: root,
+      },
+    };
+    const identity = routeIdentity({
+      harness: "opencode",
+      objective: "Test Windows path redaction",
+      workspaceRoot: root,
+    });
+    const routeId = newRouteId();
+    await persistDecision(decision(routeId), identity, options);
+    const updated = await updateRouteOutcome(
+      routeId,
+      "failure",
+      { rerouteReason: String.raw`failed at C:\Users\alice\project\file.ts` },
+      options,
+    );
+
+    expect(updated.rerouteReason).toBe(String.raw`failed at ~\project\file.ts`);
+    expect(await readFile(options.path, "utf8")).not.toContain(windowsHome);
+  });
+
   it("compacts oversized append-only stores and preserves latest records", async () => {
     const root = await mkdtemp(join(tmpdir(), "model-router-state-large-"));
     const path = join(root, "routes.jsonl");
