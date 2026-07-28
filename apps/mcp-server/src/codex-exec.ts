@@ -1,7 +1,9 @@
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { ReasoningEffort, RepoSignals } from "@model-router/contracts";
 import { type CodexDiscoveryOptions, discoverCodexModels } from "./codex-cli.js";
+import { spawnCommand } from "./command.js";
 import {
   assertRootInvocation,
   boundedOutput,
@@ -114,7 +116,7 @@ export async function executeCodexTask(
     "-",
   ];
   const childEnv = childEnvironment(sourceEnv);
-  const spawnProcess = options.spawnProcess ?? spawn;
+  const spawnProcess = (options.spawnProcess ?? spawnCommand) as typeof spawn;
   if (input.permission === "workspace-write") workspaceLocks.add(workspaceRoot);
   try {
     await revalidateTrustedWorkspace(workspaceRoot, options.trustedRoot);
@@ -138,7 +140,18 @@ export async function executeCodexTask(
 }
 
 function childEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const allowed = ["PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "LC_ALL", "SHELL", "TERM"];
+  const allowed = [
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "CODEX_HOME",
+    "TMPDIR",
+    "TEMP",
+    "LANG",
+    "LC_ALL",
+    "SHELL",
+    "TERM",
+  ];
   const env: NodeJS.ProcessEnv = { MODEL_ROUTER_CHILD_DEPTH: "1", NO_COLOR: "1" };
   for (const key of allowed) if (source[key]) env[key] = source[key];
   return env;
@@ -146,7 +159,7 @@ function childEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 function trustedImageRoots(workspaceRoot: string, env: NodeJS.ProcessEnv): string[] {
   const roots = [workspaceRoot];
-  const codexHome = env.CODEX_HOME ?? (env.HOME ? join(env.HOME, ".codex") : undefined);
+  const codexHome = env.CODEX_HOME ?? join(env.HOME ?? env.USERPROFILE ?? homedir(), ".codex");
   if (codexHome) roots.push(join(codexHome, "attachments"));
   if (env.MODEL_ROUTER_IMAGE_ROOTS) roots.push(...env.MODEL_ROUTER_IMAGE_ROOTS.split(delimiter));
   return roots.filter(Boolean);
@@ -216,6 +229,14 @@ function runChild(
 }
 
 function terminateChild(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  if (process.platform === "win32" && child.pid) {
+    try {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+    } catch {
+      /* exited */
+    }
+    return;
+  }
   if (process.platform !== "win32" && child.pid) {
     try {
       process.kill(-child.pid, signal);

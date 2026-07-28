@@ -1,9 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
 import { parseBoundedJSON } from "@model-router/telemetry";
+import { captureCommand } from "./command.js";
 
-const execFileAsync = promisify(execFile);
 const allowedEfforts = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh", "max", "ultra"]);
 
 interface RawOpenCodeModel {
@@ -181,7 +179,7 @@ function clamp(value: number): number {
 
 const systemRunner: OpenCodeCommandRunner = {
   async execFile(file, args, options) {
-    const result = await execFileAsync(file, args, options);
+    const result = await captureCommand(file, args, options);
     return { stdout: result.stdout };
   },
 };

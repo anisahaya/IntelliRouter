@@ -1,11 +1,11 @@
+import { homedir } from "node:os";
 import { UpstreamError } from "@model-router/providers";
 import { redactTokenText, redactValue } from "@model-router/telemetry";
 import type { FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 
 const UPSTREAM_PREVIEW_LIMIT = 4_096;
-const HOME_PREFIX =
-  typeof process.env.HOME === "string" && process.env.HOME.length > 2 ? process.env.HOME : "";
+const HOME_PREFIX = process.env.HOME ?? process.env.USERPROFILE ?? homedir();
 
 export function installErrors(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
@@ -78,10 +78,11 @@ function redactTokenLiterals(value: unknown): unknown {
   return value;
 }
 
-export function sanitizeClientMessage(message: string): string {
+export function sanitizeClientMessage(message: string, homePrefix = HOME_PREFIX): string {
   let safe = message;
   safe = redactTokenText(safe);
-  if (HOME_PREFIX) safe = safe.split(HOME_PREFIX).join("~");
+  if (homePrefix.length > 2) safe = safe.split(homePrefix).join("~");
+  safe = safe.replace(/\b[A-Za-z]:\\[^\s"'<>]+/g, "<path>");
   safe = safe.replace(/\/[^\s"'<>]+\/[^\s"'<>]+/g, "<path>");
   return safe.slice(0, UPSTREAM_PREVIEW_LIMIT);
 }

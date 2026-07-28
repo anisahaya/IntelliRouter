@@ -10,13 +10,15 @@ Coding work is a trajectory: tools, repository context, failures, follow-up turn
 
 ## Quick start
 
-Install the package (or build this checkout), then configure every detected native harness:
+Install the package, then configure one native harness (Codex is the quickest first-run path):
 
 ```bash
-npm install -g ./model-router-0.1.0.tgz
-model-router setup --harness all
-model-router doctor --harness all
+npm install -g intellirouter
+intellirouter setup
+intellirouter doctor --harness codex
 ```
+
+Use `--harness opencode` or `--harness claude-code` when those are your signed-in harness. `intellirouter doctor --harness all` reports optional harnesses independently; add `--strict` when every selected harness must pass.
 
 During local development, run `pnpm build` and `node dist/cli/index.js setup --harness all`. Restart Codex, OpenCode, or Claude Code after setup, then ask:
 
@@ -148,18 +150,26 @@ The versioned record, label-strength rules, public seed import boundary, and hid
 ### CLI
 
 ```text
-model-router serve [--config path]
-model-router doctor [--config path] [--probe]
-model-router route --task "..." [--profile balanced] [--protocol openai-chat] [--session id] [--model alias] [--tools] [--json] [--vision] [--streaming] [--minimum-context tokens]
-model-router explain <route-id>
-model-router stats [--since ISO_TIMESTAMP] [--model alias] [--task type]
-model-router feedback <route-id> --outcome success [--score 1] [--tag accepted]
-model-router config init [path]
-model-router setup --harness codex|opencode|claude-code|all [--force]
-model-router doctor --harness codex|opencode|claude-code|all
-model-router route-native --harness codex|opencode|claude-code --objective "..." [--current-model "..."]
-model-router explain-native <route-id>
+intellirouter serve [--config path]
+intellirouter doctor [--config path] [--probe]
+intellirouter route --task "..." [--profile balanced] [--protocol openai-chat] [--session id] [--model alias] [--tools] [--json] [--vision] [--streaming] [--minimum-context tokens]
+intellirouter explain <route-id>
+intellirouter stats [--since ISO_TIMESTAMP] [--model alias] [--task type]
+intellirouter feedback <route-id> --outcome success [--score 1] [--tag accepted]
+intellirouter config init [path]
+intellirouter setup [--harness codex|opencode|claude-code|all] [--force]
+intellirouter doctor --harness codex|opencode|claude-code|all [--strict]
+intellirouter route-native --harness codex|opencode|claude-code --objective "..." [--current-model "..."]
+intellirouter explain-native <route-id>
 ```
+
+`model-router` remains a compatibility alias for this release. It prints a deprecation warning to stderr; scripts should migrate to `intellirouter`.
+
+## Support
+
+Officially supported: macOS, Linux, and Windows on Node.js 22 and 24. Native `better-sqlite3` binaries must be available for your Node version. Optional harnesses (Codex, OpenCode, Claude Code, and Pi) require their own installation and authentication; an unavailable optional harness does not make `doctor --harness all` fail unless `--strict` is supplied.
+
+See [SUPPORT.md](SUPPORT.md) for diagnostics and reporting paths, [SECURITY.md](SECURITY.md) for private vulnerability reports, and [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
 ### Supported v0.1 proxy subset
 

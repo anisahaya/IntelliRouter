@@ -1,23 +1,49 @@
-import { execFile } from "node:child_process";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import type { HarnessId } from "@model-router/contracts";
 import { discoverClaudeModels } from "../../../apps/mcp-server/src/claude-cli.js";
 import { discoverCodexModels } from "../../../apps/mcp-server/src/codex-cli.js";
 import { discoverOpenCodeModels } from "../../../apps/mcp-server/src/opencode-cli.js";
+import { commandCandidates, runCommand } from "./command.js";
 
-const execFileAsync = promisify(execFile);
-
-export async function nativeDoctor(harness: HarnessId | "all"): Promise<Record<string, unknown>> {
+export async function nativeDoctor(
+  harness: HarnessId | "all",
+  strict = false,
+): Promise<Record<string, unknown>> {
   const selected = harness === "all" ? (["codex", "opencode", "claude-code"] as const) : [harness];
+  const packageResult = await packageCheck();
   const checks = await Promise.all(selected.map((value) => checkHarness(value)));
+  const usable = checks.filter((check) => check.ready).length;
+  const ready = evaluateDoctorReadiness(
+    harness,
+    checks as Array<{ ready: boolean }>,
+    Boolean(packageResult.ready),
+    strict,
+  );
   return {
-    ready: checks.every((check) => check.ready),
-    package: await packageCheck(),
+    ready,
+    strict,
+    package: packageResult,
+    summary:
+      harness === "all"
+        ? `core ${packageResult.ready ? "ready" : "not ready"}; ${usable}/${checks.length} harnesses usable`
+        : checks[0]?.ready
+          ? "selected harness usable"
+          : "selected harness unavailable",
     harnesses: checks,
   };
+}
+
+export function evaluateDoctorReadiness(
+  harness: HarnessId | "all",
+  checks: Array<{ ready: boolean }>,
+  packageReady: boolean,
+  strict = false,
+): boolean {
+  if (!packageReady) return false;
+  if (strict) return checks.length > 0 && checks.every((check) => check.ready);
+  return harness === "all" ? checks.some((check) => check.ready) : checks[0]?.ready === true;
 }
 
 async function checkHarness(harness: HarnessId): Promise<Record<string, unknown>> {
@@ -30,12 +56,24 @@ async function checkHarness(harness: HarnessId): Promise<Record<string, unknown>
     };
   }
   try {
-    const executable =
+    const executableName =
       harness === "codex" ? "codex" : harness === "opencode" ? "opencode" : "claude";
-    const version = (
-      await execFileAsync(executable, ["--version"], { timeout: 10_000 })
-    ).stdout.trim();
-    const models = await discoverModels(harness);
+    const candidates = commandCandidates(executableName);
+    let executable = candidates[0];
+    let stdout = "";
+    let lastError: unknown;
+    for (const candidate of candidates) {
+      try {
+        stdout = await runCommand(candidate, ["--version"]);
+        executable = candidate;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!stdout) throw lastError instanceof Error ? lastError : new Error("executable not found");
+    const version = stdout.trim();
+    const models = await discoverModels(harness, executable);
     return {
       harness,
       ready: models.length > 0,
@@ -59,10 +97,10 @@ async function checkHarness(harness: HarnessId): Promise<Record<string, unknown>
   }
 }
 
-function discoverModels(harness: HarnessId) {
-  if (harness === "codex") return discoverCodexModels();
-  if (harness === "opencode") return discoverOpenCodeModels();
-  return discoverClaudeModels();
+function discoverModels(harness: HarnessId, executable?: string) {
+  if (harness === "codex") return discoverCodexModels({ executable });
+  if (harness === "opencode") return discoverOpenCodeModels({ executable });
+  return discoverClaudeModels({ executable });
 }
 
 async function packageCheck(): Promise<Record<string, unknown>> {

@@ -6,6 +6,7 @@ coverage/
 *.db-wal
 .env
 *.log
+*.tgz
 .DS_Store
 .codex-worktrees/
 

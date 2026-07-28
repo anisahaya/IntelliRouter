@@ -1,13 +1,14 @@
 {
-  "name": "model-router",
+  "name": "intellirouter",
   "version": "0.1.0",
   "private": false,
   "type": "module",
   "packageManager": "pnpm@11.9.0",
   "engines": {
-    "node": ">=22"
+    "node": "^22.0.0 || ^24.0.0"
   },
   "bin": {
+    "intellirouter": "dist/cli/index.js",
     "model-router": "dist/cli/index.js"
   },
   "files": [
@@ -16,7 +17,27 @@
     ".mcp.json",
     ".codex-plugin/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "SUPPORT.md",
+    "CHANGELOG.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anisahaya/model-router.git"
+  },
+  "homepage": "https://github.com/anisahaya/model-router#readme",
+  "bugs": {
+    "url": "https://github.com/anisahaya/model-router/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "ai",
+    "llm",
+    "model-router",
+    "intellirouter",
+    "mcp"
   ],
   "scripts": {
     "build": "tsup",
@@ -27,6 +48,7 @@
     "test": "vitest run --config vitest.workspace.ts",
     "test:coverage": "vitest run --coverage --config vitest.workspace.ts",
     "smoke": "node scripts/smoke.mjs",
+    "package:smoke": "pnpm build && node scripts/package-smoke.mjs",
     "mcp:smoke": "node scripts/mcp-smoke.mjs",
     "postman": "node scripts/postman-smoke.mjs",
     "audit:policy": "pnpm audit --prod --json | node scripts/check-audit-policy.mjs",
@@ -38,9 +60,10 @@
     "verify": "pnpm run ci && pnpm validate:skill && pnpm validate:plugin"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.2",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "12.11.1",
     "commander": "^14.0.2",
+    "cross-spawn": "^7.0.6",
     "fastify": "^5.6.2",
     "yaml": "^2.8.2",
     "zod": "^4.1.13"
@@ -48,6 +71,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.3.8",
     "@types/better-sqlite3": "7.6.13",
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "4.1.10",
     "newman": "^6.2.1",

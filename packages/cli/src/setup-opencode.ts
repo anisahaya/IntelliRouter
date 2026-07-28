@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process";
 import { access, copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { promisify } from "node:util";
+import { runCommand } from "./command.js";
 import type { InstalledAssets } from "./setup-shared.js";
-
-const execFileAsync = promisify(execFile);
 
 export async function setupOpenCode(
   assets: InstalledAssets,
@@ -37,7 +34,7 @@ export async function setupOpenCode(
   const tempPath = `${configPath}.model-router.tmp`;
   await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
   await rename(tempPath, configPath);
-  await execFileAsync("opencode", ["debug", "config"], {
+  await runCommand("opencode", ["debug", "config"], {
     timeout: 15_000,
     env: { ...process.env, OPENCODE_CONFIG: configPath },
   });

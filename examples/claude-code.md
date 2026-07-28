@@ -3,8 +3,8 @@
 Configure the native MCP and portable skill without changing Claude Code authentication or its selected model:
 
 ```bash
-model-router setup --harness claude-code
-model-router doctor --harness claude-code
+intellirouter setup --harness claude-code
+intellirouter doctor --harness claude-code
 ```
 
 Restart Claude Code, then ask:
