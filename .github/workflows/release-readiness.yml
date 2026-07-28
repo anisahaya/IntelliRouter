@@ -16,4 +16,4 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: node scripts/release-readiness.mjs
-      # Publishing is intentionally not automated in this release PR. Configure npm trusted publishing/OIDC and provenance separately.
+      # Publishing is handled by bootstrap-publish.yml for 0.1.0 and publish.yml for later releases.

@@ -1,0 +1,46 @@
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish (for example v0.1.1)"
+        required: true
+        type: string
+      confirm_trusted_publisher:
+        description: "Confirm npm trusted publishing is configured for publish.yml"
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    if: inputs.confirm_trusted_publisher == true && startsWith(inputs.tag, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.5.1
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.9.0 }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify
+      - name: Verify exact tag and package version
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          node -e 'if (!/^v\d+\.\d+\.\d+$/.test(process.env.RELEASE_TAG)) throw new Error("tag must be vX.Y.Z")'
+          test "$RELEASE_TAG" = "v$(node -p 'require("./package.json").version')"
+          node scripts/release-readiness.mjs
+      - name: Publish through npm trusted publishing
+        run: npm publish --access public --provenance
