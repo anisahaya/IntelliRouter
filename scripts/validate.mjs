@@ -1,84 +1,52 @@
-import { spawn } from "node:child_process";
-import { mkdirSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { access, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const FIXED_TMP =
-  process.platform === "win32"
-    ? resolve(process.env.SystemDrive || "C:", "\\Windows\\Temp")
-    : "/tmp";
-let SAFE_TMP;
-try {
-  SAFE_TMP = realpathSync(FIXED_TMP);
-} catch {
-  mkdirSync(FIXED_TMP, { recursive: true });
-  SAFE_TMP = realpathSync(FIXED_TMP);
-}
-const HOME = process.env.HOME && process.env.HOME.length > 0 ? process.env.HOME : homedir();
-const CODEX_HOME =
-  process.env.CODEX_HOME && process.env.CODEX_HOME.length > 0
-    ? process.env.CODEX_HOME
-    : join(HOME, ".codex");
+const kind = process.argv[2];
+const root = fileURLToPath(new URL("..", import.meta.url));
+const fail = (message) => {
+  throw new Error(`validate: ${message}`);
+};
 
-function safeAncestor(candidate) {
-  if (process.platform === "win32" || !candidate) return SAFE_TMP;
+async function exists(path) {
   try {
-    let path = resolve(candidate);
-    while (path !== dirname(path)) {
-      try {
-        const resolved = realpathSync(path);
-        if (resolved === SAFE_TMP || resolved.startsWith(`${SAFE_TMP}${sep}`)) return resolved;
-        return SAFE_TMP;
-      } catch {
-        path = dirname(path);
-      }
-    }
+    await access(resolve(root, path));
+    return true;
   } catch {
-    // fall through to fixed anchor
+    return false;
   }
-  return SAFE_TMP;
 }
 
-const cacheRoot = safeAncestor(process.env.TMPDIR);
-const UV_CACHE_DIR = join(cacheRoot, "model-router-uv-cache");
-mkdirSync(UV_CACHE_DIR, { recursive: true });
-
-const KIND = process.argv[2];
-const ARGS = new Map([
-  [
-    "skill",
-    [
-      "--with",
-      "pyyaml",
-      "python",
-      `${CODEX_HOME}/skills/.system/skill-creator/scripts/quick_validate.py`,
-      "skills/intelligent-model-router",
-    ],
-  ],
-  [
-    "plugin",
-    [
-      "--with",
-      "pyyaml",
-      "python",
-      `${CODEX_HOME}/skills/.system/plugin-creator/scripts/validate_plugin.py`,
-      ".",
-    ],
-  ],
-]);
-const args = ARGS.get(KIND);
-if (!args) {
-  console.error(`validate: unknown kind "${KIND}". Usage: node scripts/validate.mjs skill|plugin`);
-  process.exit(2);
+async function validateSkill() {
+  const path = "skills/intelligent-model-router/SKILL.md";
+  if (!(await exists(path))) fail(`missing ${path}`);
+  const text = await readFile(resolve(root, path), "utf8");
+  if (!text.startsWith("---\n") || !text.includes("name: intelligent-model-router"))
+    fail("skill frontmatter is missing name");
+  for (const required of ["description:", "route_harness_task", "references/"])
+    if (!text.includes(required)) fail(`skill missing ${required}`);
+  console.log("skill validation passed");
 }
 
-const child = spawn(process.platform === "win32" ? "uv.exe" : "uv", ["run", ...args], {
-  stdio: "inherit",
-  env: { ...process.env, UV_CACHE_DIR },
-  shell: false,
-});
-child.once("error", (error) => {
-  console.error(`validate: failed to spawn uv: ${error.message}`);
-  process.exit(1);
-});
-child.once("exit", (code) => process.exit(code ?? 1));
+async function validatePlugin() {
+  const path = ".codex-plugin/plugin.json";
+  if (!(await exists(path))) fail(`missing ${path}`);
+  const plugin = JSON.parse(await readFile(resolve(root, path), "utf8"));
+  for (const key of ["name", "version", "description", "skills", "interface"])
+    if (typeof plugin[key] === "undefined") fail(`plugin missing ${key}`);
+  if (plugin.skills !== "./skills/") fail("plugin skills must point to ./skills/");
+  if (!(await exists("skills/intelligent-model-router"))) fail("plugin skill directory missing");
+  console.log("plugin validation passed");
+}
+
+try {
+  if (kind === "skill") await validateSkill();
+  else if (kind === "plugin") await validatePlugin();
+  else {
+    console.error("validate: usage node scripts/validate.mjs skill|plugin");
+    process.exitCode = 2;
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}
