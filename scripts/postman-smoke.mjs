@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { spawn } from "cross-spawn";
 import { collectPostmanOffenders } from "./postman-policy.mjs";
 import { startHarness } from "./test-harness.mjs";
 
