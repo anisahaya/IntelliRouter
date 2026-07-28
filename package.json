@@ -25,11 +25,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/anisahaya/model-router.git"
+    "url": "https://github.com/anisahaya/IntelliRouter.git"
   },
-  "homepage": "https://github.com/anisahaya/model-router#readme",
+  "homepage": "https://github.com/anisahaya/IntelliRouter#readme",
   "bugs": {
-    "url": "https://github.com/anisahaya/model-router/issues"
+    "url": "https://github.com/anisahaya/IntelliRouter/issues"
   },
   "license": "MIT",
   "keywords": [
