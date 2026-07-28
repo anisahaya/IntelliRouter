@@ -1,0 +1,43 @@
+name: bootstrap-npm-publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_bootstrap:
+        description: "Confirm this one-time intellirouter@0.1.0 bootstrap publish"
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  bootstrap:
+    if: inputs.confirm_bootstrap == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: 9d6fb17bf05cf58f67972e34c059cc84da096b81
+      - name: Verify exact bootstrap commit and package
+        run: |
+          test "$(git rev-parse HEAD)" = "9d6fb17bf05cf58f67972e34c059cc84da096b81"
+          test "$(node -p 'require("./package.json").name')" = "intellirouter"
+          test "$(node -p 'require("./package.json").version')" = "0.1.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.5.1
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.9.0 }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify
+      - name: Bootstrap publish with temporary token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          test -n "$NODE_AUTH_TOKEN"
+          npm publish --access public --provenance
