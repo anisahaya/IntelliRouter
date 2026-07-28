@@ -4,6 +4,8 @@ A cross-harness skill and local MCP that act like an auto-model mode. It uses th
 
 The plugin owns the workflow. Native Codex, OpenCode, and Claude Code routing needs no separate provider key, YAML, or proxy. The separate self-hosted gateway remains available for Pi and cross-provider API compatibility.
 
+[npm package](https://www.npmjs.com/package/intellirouter) · [source](https://github.com/anisahaya/IntelliRouter) · [CI](https://github.com/anisahaya/IntelliRouter/actions/workflows/ci.yml) · [security policy](SECURITY.md)
+
 ## Why this exists
 
 Coding work is a trajectory: tools, repository context, failures, follow-up turns, and task affinity matter. A static three-model list cannot represent what a signed-in Codex installation can actually run. The auto router reads the live catalog, filters hard requirements, scores task fit deterministically, and keeps the selected candidate for the task.

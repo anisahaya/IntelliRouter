@@ -14,16 +14,15 @@ permissions:
 
 jobs:
   bootstrap:
-    if: inputs.confirm_bootstrap == true
+    if: inputs.confirm_bootstrap == true && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: 9d6fb17bf05cf58f67972e34c059cc84da096b81
       - name: Verify exact bootstrap commit and package
         run: |
-          test "$(git rev-parse HEAD)" = "9d6fb17bf05cf58f67972e34c059cc84da096b81"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(node -p 'require("./package.json").name')" = "intellirouter"
           test "$(node -p 'require("./package.json").version')" = "0.1.0"
       - uses: actions/setup-node@v4
