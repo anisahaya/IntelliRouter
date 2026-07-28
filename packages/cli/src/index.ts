@@ -12,7 +12,11 @@ import { setupHarness } from "./setup.js";
 import { getStats } from "./stats.js";
 
 const invokedAs = process.argv[1]?.toLowerCase().split(/[\\/]/).pop() ?? "";
-if (invokedAs === "model-router" || invokedAs === "model-router.js") {
+if (
+  process.env.INTELLIROUTER_LEGACY_ALIAS === "1" ||
+  invokedAs === "model-router" ||
+  invokedAs === "model-router.js"
+) {
   process.stderr.write("Warning: model-router is deprecated; use intellirouter instead.\n");
 }
 const program = new Command()

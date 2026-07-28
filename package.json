@@ -9,7 +9,7 @@
   },
   "bin": {
     "intellirouter": "dist/cli/index.js",
-    "model-router": "dist/cli/index.js"
+    "model-router": "dist/cli/model-router.js"
   },
   "files": [
     "dist/",

@@ -24,6 +24,7 @@ if (!artifact?.filename || !artifact.filename.startsWith(`${pkg.name}-${pkg.vers
 const names = new Set((artifact.files ?? []).map((file) => file.path));
 for (const required of [
   "dist/cli/index.js",
+  "dist/cli/model-router.js",
   "dist/mcp-server/index.js",
   "skills/intelligent-model-router/SKILL.md",
   ".mcp.json",
