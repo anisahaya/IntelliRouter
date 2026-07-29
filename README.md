@@ -41,7 +41,7 @@ intellirouter setup --harness opencode
 intellirouter doctor --harness opencode
 ```
 
-Restart OpenCode and use the same prompt. OpenCode Desktop is not a target surface; use OpenCode CLI.
+Restart OpenCode and use the same prompt. OpenCode Desktop is not compatible currently; use OpenCode CLI.
 
 `setup` registers the bundled MCP server and skill. It does not change your selected model, provider, or authentication.
 
@@ -49,7 +49,7 @@ Restart OpenCode and use the same prompt. OpenCode Desktop is not a target surfa
 
 - Discovers models exposed by the active harness.
 - Filters by required tools, vision, editing, policy, and context window.
-- Selects deterministically, keeps task affinity, and falls back safely.
+- Selects deterministically, keeps task affinity, and falls back safely. (see [Routing math and safety](docs/routing-math.md).
 - Uses metadata only for repository signals: file and language counts, manifests, test presence, and aggregate Git changes. It does not read source code to select a model.
 
 Codex needs the visible current-model label in task context to reserve it as the fallback. If it is unavailable or unclear, routing safely stops instead of selecting recursively.
