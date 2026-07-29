@@ -1,12 +1,10 @@
 # Advanced self-hosting
 
-The external compatibility proxy supplies the broad model catalog. When its MCP tools are connected, the skill compares configured models across providers and delegates through the winner. Without it, the skill can route only among models or agents the host exposes natively.
+The optional compatibility proxy enables configured cross-provider routing, OpenAI- and Anthropic-compatible endpoints, fallback, and local SQLite telemetry. Native Codex, Claude Code, and OpenCode routing does not require it.
 
-Use this setup for cross-provider selection, compatibility endpoints, deterministic configured scoring, fallback, or local SQLite telemetry. YAML remains an advanced administrator concern rather than part of each routing request.
+## Start the proxy
 
-## Start the backend
-
-Requirements: Node.js 22+, pnpm, a router YAML file, and credentials for the providers configured in that file.
+Requirements: Node.js 22+, pnpm, a router YAML file, and credentials for the providers in that file.
 
 ```bash
 pnpm install
@@ -20,26 +18,39 @@ node dist/cli/index.js doctor
 node dist/cli/index.js serve
 ```
 
-Keep populated configuration and environment files out of source control. Binding outside loopback requires an authentication token configuration.
+Keep populated configuration and environment files out of source control. Binding outside loopback requires configured authentication.
 
-Harness examples are available for [Codex](../../../examples/codex.config.toml), [Claude Code](../../../examples/claude-code.md), [OpenCode](../../../examples/opencode.json), and [Pi](../../../examples/pi.md).
+## Compatibility API
 
-## MCP model catalog
+Supported endpoints:
 
-Build the project before launching `.mcp.json`, which points to `dist/mcp-server/index.js`. Set the MCP working directory (or `MODEL_ROUTER_WORKSPACE_ROOT`) to the codebase the auto tools may inspect or edit. `MODEL_ROUTER_BASE_URL` and, when configured, `MODEL_ROUTER_AUTH_TOKEN` are needed only for the legacy external-provider tools. These tools are available only when that server is connected:
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+- `POST /v1/messages`
+- `GET /v1/models`
 
-- `auto_route` discovers and scores live Codex models with host-registered user agents;
-- `delegate_codex_task` revalidates and runs one exact Codex model and effort;
-- `route_task` asks the external configured router for a dry-run decision;
-- `delegate_task` sends one bounded prompt through the external proxy;
-- `explain_route`, `router_stats`, `submit_route_feedback`, and `list_router_models` inspect or update external backend state.
+Use `model: "auto"` or `router/<profile>`. `x-router-model`, `x-router-session`, and `x-router-profile` can pin a model, maintain affinity, or select a profile. Responses include route and fallback metadata in `x-router-*` headers.
 
-Call `list_router_models` first. Call `route_task` for every represented protocol with identical requirements, pass those results to `scripts/select-catalog-route.mjs`, and send its winning logical model and exact protocol to `delegate_task`. Do not rely on dry-run affinity alone.
+The proxy preserves supported request bodies, tool definitions/calls, usage, provider request IDs, and SSE bytes. It does not translate protocols, resume partial streams, or support provider-specific WebSockets, file lifecycles, background Responses jobs, or hosted tools.
 
-`delegate_task` must receive an explicit bounded prompt and `maxOutputTokens`. Send only required context and never credentials or unrelated source. If the backend is unavailable, continue with host-native fallback routing.
+## Routing and safety
 
-## Compatibility controls
+Models must advertise the incoming protocol and satisfy the request's tools, JSON, vision, streaming, and context requirements. Explicit sessions retain their model until it expires, becomes ineligible, or is unhealthy. Network and upstream failures can fall back only before response bytes are emitted.
 
-Compatibility requests accept `model: "auto"` or `model: "router/<profile>"`. They may also use `x-router-model`, `x-router-session`, `x-router-profile`, and `x-router-debug`. Use an opaque task or conversation identifier for session affinity; never derive it from prompt text.
+SQLite records route features, scores, aliases, latency, status, cost estimates, HMAC-hashed sessions, attempts, and explicit feedback. Raw content capture is disabled by default; source and embeddings are opt-in and bounded. Logs redact common secret-shaped values.
 
-Every compatibility response reports request, route, model, profile, and fallback metadata in `x-router-*` headers. Call `explain_route` for a returned route ID when the fallback chain needs inspection. Submit feedback only after an observable outcome.
+Read [training data](../../../docs/training-data.md) for the opt-in task-run record and evaluation boundary, and [routing math](../../../docs/routing-math.md) for scoring and evidence limits.
+
+## CLI
+
+```text
+intellirouter serve [--config path]
+intellirouter doctor [--config path] [--probe]
+intellirouter route --task "..." [--profile balanced] [--protocol openai-chat]
+intellirouter explain <route-id>
+intellirouter stats [--since ISO_TIMESTAMP] [--model alias] [--task type]
+intellirouter feedback <route-id> --outcome success [--score 1] [--tag accepted]
+intellirouter config init [path]
+```
+
+For native harness setup, return to the [README](../../../README.md#quick-start).
