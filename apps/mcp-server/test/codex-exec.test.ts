@@ -32,14 +32,15 @@ const repoSignals: RepoSignals = {
 beforeAll(async () => {
   fixtureRoot = await mkdtemp(join(tmpdir(), "model-router-exec-"));
   workspace = join(fixtureRoot, "workspace");
-  fakeCodex = join(fixtureRoot, "fake-codex.mjs");
+  const fakeCodexScript = join(fixtureRoot, "fake-codex.mjs");
+  fakeCodex = process.platform === "win32" ? join(fixtureRoot, "fake-codex.cmd") : fakeCodexScript;
   await mkdir(workspace);
   await writeFile(join(workspace, "image.png"), "not-a-real-image", "utf8");
   const writerCode = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(
     join(workspace, "grandchild.txt"),
   )}, "escaped"), 1500)`;
   await writeFile(
-    fakeCodex,
+    fakeCodexScript,
     `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args[0] === "debug" && args[1] === "models") {
@@ -57,7 +58,14 @@ if (args[0] === "debug" && args[1] === "models") {
 `,
     "utf8",
   );
-  await chmod(fakeCodex, 0o755);
+  await chmod(fakeCodexScript, 0o755);
+  if (process.platform === "win32") {
+    await writeFile(
+      fakeCodex,
+      `@echo off\r\n"${process.execPath}" "${fakeCodexScript}" %*\r\n`,
+      "utf8",
+    );
+  }
 });
 
 afterAll(async () => {

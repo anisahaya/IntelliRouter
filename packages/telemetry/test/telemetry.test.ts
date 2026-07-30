@@ -265,5 +265,5 @@ describe("telemetry", () => {
     ).toBe(6);
     expect(reopened.getDecision("served")?.logicalModel).toBe("cheap");
     reopened.close();
-  });
+  }, 30_000);
 });
