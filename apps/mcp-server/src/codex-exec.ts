@@ -1,4 +1,4 @@
-import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { ReasoningEffort, RepoSignals } from "@model-router/contracts";
@@ -6,11 +6,11 @@ import { type CodexDiscoveryOptions, discoverCodexModels } from "./codex-cli.js"
 import { spawnCommand } from "./command.js";
 import {
   assertRootInvocation,
-  boundedOutput,
   buildDelegatedPrompt,
   sanitizeAcceptanceChecks,
   sanitizeText,
 } from "./context-security.js";
+import { runHarnessChild } from "./harness-child-process.js";
 import { resolveTaskTimeout } from "./timeout.js";
 import {
   resolveTrustedFile,
@@ -18,7 +18,6 @@ import {
   revalidateTrustedWorkspace,
 } from "./workspace-security.js";
 
-const MAX_CAPTURE_CHARS = 64_000;
 const workspaceLocks = new Set<string>();
 
 export interface CodexTaskInput {
@@ -120,20 +119,27 @@ export async function executeCodexTask(
   if (input.permission === "workspace-write") workspaceLocks.add(workspaceRoot);
   try {
     await revalidateTrustedWorkspace(workspaceRoot, options.trustedRoot);
-    return await runChild(
-      spawnProcess(executable, args, {
+    return await runHarnessChild({
+      child: spawnProcess(executable, args, {
         cwd: workspaceRoot,
         env: childEnv,
         shell: false,
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
       }),
-      prompt,
-      resolveTaskTimeout(input),
-      input.model,
-      input.reasoningEffort,
-      objective.redacted || conversation.redacted || checks.some((check) => check.redacted),
-    );
+      stdin: prompt,
+      timeoutMs: resolveTaskTimeout(input),
+      timedOutCloseDelayMs: 2_100,
+      inputRedacted:
+        objective.redacted || conversation.redacted || checks.some((check) => check.redacted),
+      launchErrorPrefix: "Unable to launch Codex child",
+      parseOutput: (stdout) => ({ output: stdout }),
+      createResult: ({ sessionId: _sessionId, ...result }) => ({
+        model: input.model,
+        reasoningEffort: input.reasoningEffort,
+        ...result,
+      }),
+    });
   } finally {
     if (input.permission === "workspace-write") workspaceLocks.delete(workspaceRoot);
   }
@@ -163,87 +169,4 @@ function trustedImageRoots(workspaceRoot: string, env: NodeJS.ProcessEnv): strin
   if (codexHome) roots.push(join(codexHome, "attachments"));
   if (env.MODEL_ROUTER_IMAGE_ROOTS) roots.push(...env.MODEL_ROUTER_IMAGE_ROOTS.split(delimiter));
   return roots.filter(Boolean);
-}
-
-function runChild(
-  child: ChildProcessWithoutNullStreams,
-  prompt: string,
-  timeoutMs: number,
-  model: string,
-  reasoningEffort: ReasoningEffort,
-  inputRedacted: boolean,
-): Promise<CodexTaskResult> {
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    let settled = false;
-    const timer = setTimeout(
-      () => {
-        timedOut = true;
-        terminateChild(child, "SIGTERM");
-        setTimeout(() => terminateChild(child, "SIGKILL"), 2_000).unref();
-      },
-      Math.max(1_000, timeoutMs),
-    );
-    timer.unref();
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      if (stdout.length < MAX_CAPTURE_CHARS)
-        stdout += chunk.slice(0, MAX_CAPTURE_CHARS - stdout.length);
-    });
-    child.stderr.on("data", (chunk: string) => {
-      if (stderr.length < MAX_CAPTURE_CHARS)
-        stderr += chunk.slice(0, MAX_CAPTURE_CHARS - stderr.length);
-    });
-    child.once("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`Unable to launch Codex child: ${error.message}`));
-    });
-    child.once("close", (exitCode) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      const complete = () => {
-        const safeOut = boundedOutput(stdout, MAX_CAPTURE_CHARS);
-        const safeErr = boundedOutput(stderr, 8_000);
-        resolve({
-          model,
-          reasoningEffort,
-          output: safeOut.text,
-          stderr: safeErr.text,
-          exitCode,
-          timedOut,
-          truncated: safeOut.truncated || safeErr.truncated,
-          redacted: inputRedacted || safeOut.redacted || safeErr.redacted,
-        });
-      };
-      if (timedOut) setTimeout(complete, 2_100);
-      else complete();
-    });
-    child.stdin.end(prompt);
-  });
-}
-
-function terminateChild(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
-  if (process.platform === "win32" && child.pid) {
-    try {
-      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
-    } catch {
-      /* exited */
-    }
-    return;
-  }
-  if (process.platform !== "win32" && child.pid) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // The process may have exited between timeout and signal delivery.
-    }
-  }
-  child.kill(signal);
 }

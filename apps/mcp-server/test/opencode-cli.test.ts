@@ -37,12 +37,45 @@ describe("OpenCode native catalog discovery", () => {
       { ...model("retired", "Retired"), status: "deprecated" },
     );
     const runner: OpenCodeCommandRunner = {
-      async execFile(_file, args) {
+      async execFile(file, args, options) {
+        expect(file).toBe("/custom/opencode");
         expect(args).toEqual(["models", "openai", "--verbose"]);
+        expect(options).toEqual({
+          timeout: 30_000,
+          maxBuffer: 16 * 1024 * 1024,
+          shell: false,
+          encoding: "utf8",
+          env: {
+            NO_COLOR: "1",
+            HOME: "/home/test",
+            PATH: "/test/bin",
+            TMPDIR: "/tmp/test",
+            LANG: "en_US.UTF-8",
+            LC_ALL: "en_US.UTF-8",
+            XDG_CONFIG_HOME: "/config",
+            XDG_DATA_HOME: "/data",
+            XDG_CACHE_HOME: "/cache",
+          },
+        });
         return { stdout: output };
       },
     };
-    const candidates = await discoverOpenCodeModels({ runner, provider: "openai" });
+    const candidates = await discoverOpenCodeModels({
+      runner,
+      provider: "openai",
+      env: {
+        OPENCODE_BIN: "/custom/opencode",
+        HOME: "/home/test",
+        PATH: "/test/bin",
+        TMPDIR: "/tmp/test",
+        LANG: "en_US.UTF-8",
+        LC_ALL: "en_US.UTF-8",
+        XDG_CONFIG_HOME: "/config",
+        XDG_DATA_HOME: "/data",
+        XDG_CACHE_HOME: "/cache",
+        TEST_SECRET: "must-not-pass",
+      },
+    });
     expect(candidates).toHaveLength(2);
     expect(candidates[0]).toMatchObject({
       id: "openai/gpt-5.6-luna",

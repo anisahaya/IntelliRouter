@@ -1,6 +1,6 @@
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
 import { parseBoundedJSON } from "@model-router/telemetry";
-import { captureCommand } from "./command.js";
+import { type CommandRunner, systemCommandRunner } from "./command.js";
 
 const allowedEfforts = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh", "max", "ultra"]);
 
@@ -17,19 +17,7 @@ interface RawModel {
   supports_search_tool?: unknown;
 }
 
-export interface CodexCommandRunner {
-  execFile(
-    file: string,
-    args: string[],
-    options: {
-      timeout: number;
-      maxBuffer: number;
-      shell: false;
-      encoding: "utf8";
-      env: NodeJS.ProcessEnv;
-    },
-  ): Promise<{ stdout: string }>;
-}
+export interface CodexCommandRunner extends CommandRunner {}
 
 export interface CodexDiscoveryOptions {
   runner?: CodexCommandRunner;
@@ -41,14 +29,14 @@ export async function discoverCodexModels(
   options: CodexDiscoveryOptions = {},
 ): Promise<AutoCandidate[]> {
   return discoverCodexCandidates(
-    options.runner ?? systemRunner,
+    options.runner ?? systemCommandRunner,
     options.env ?? process.env,
     options.executable,
   );
 }
 
 export async function discoverCodexCandidates(
-  runner: CodexCommandRunner = systemRunner,
+  runner: CodexCommandRunner = systemCommandRunner,
   env: NodeJS.ProcessEnv = process.env,
   executableOverride?: string,
 ): Promise<AutoCandidate[]> {
@@ -167,10 +155,3 @@ function discoveryEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 function clamp(value: number): number {
   return Math.max(0, Math.min(1, Number(value.toFixed(4))));
 }
-
-const systemRunner: CodexCommandRunner = {
-  async execFile(file, args, options) {
-    const result = await captureCommand(file, args, options);
-    return { stdout: result.stdout };
-  },
-};

@@ -11,14 +11,28 @@ import {
 describe("Claude Code native catalog discovery", () => {
   it("uses signed-in model aliases and honors the configured allowlist", async () => {
     const runner: ClaudeCommandRunner = {
-      async execFile(_file, args) {
+      async execFile(file, args, options) {
+        expect(file).toBe("/custom/claude");
         expect(args).toEqual(["auth", "status", "--json"]);
+        expect(options).toEqual({
+          timeout: 15_000,
+          maxBuffer: 1024 * 1024,
+          shell: false,
+          encoding: "utf8",
+          env: { NO_COLOR: "1", HOME: "/home/test", PATH: "/test/bin" },
+        });
         return { stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) };
       },
     };
     const candidates = await discoverClaudeModels({
       runner,
       availableModels: ["opus", "sonnet", "haiku"],
+      env: {
+        CLAUDE_BIN: "/custom/claude",
+        HOME: "/home/test",
+        PATH: "/test/bin",
+        TEST_SECRET: "must-not-pass",
+      },
     });
     expect(candidates.map((candidate) => candidate.id)).toEqual(["haiku", "opus", "sonnet"]);
     expect(candidates.find((candidate) => candidate.id === "opus")).toMatchObject({

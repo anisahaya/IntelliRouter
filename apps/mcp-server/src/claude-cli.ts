@@ -2,23 +2,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
 import { parseBoundedJSON } from "@model-router/telemetry";
-import { captureCommand } from "./command.js";
+import { type CommandRunner, systemCommandRunner } from "./command.js";
 
 const defaultAliases = ["opus", "sonnet", "haiku"];
 
-export interface ClaudeCommandRunner {
-  execFile(
-    file: string,
-    args: string[],
-    options: {
-      timeout: number;
-      maxBuffer: number;
-      shell: false;
-      encoding: "utf8";
-      env: NodeJS.ProcessEnv;
-    },
-  ): Promise<{ stdout: string }>;
-}
+export interface ClaudeCommandRunner extends CommandRunner {}
 
 export interface ClaudeDiscoveryOptions {
   runner?: ClaudeCommandRunner;
@@ -33,7 +21,7 @@ export async function discoverClaudeModels(
 ): Promise<AutoCandidate[]> {
   const sourceEnv = options.env ?? process.env;
   const executable = options.executable ?? sourceEnv.CLAUDE_BIN ?? "claude";
-  const result = await (options.runner ?? systemRunner).execFile(
+  const result = await (options.runner ?? systemCommandRunner).execFile(
     executable,
     ["auth", "status", "--json"],
     {
@@ -144,10 +132,3 @@ function discoveryEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   }
   return result;
 }
-
-const systemRunner: ClaudeCommandRunner = {
-  async execFile(file, args, options) {
-    const result = await captureCommand(file, args, options);
-    return { stdout: result.stdout };
-  },
-};
