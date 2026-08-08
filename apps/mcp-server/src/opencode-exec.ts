@@ -1,15 +1,15 @@
-import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import type { ReasoningEffort, RepoSignals } from "@model-router/contracts";
 import { parseBoundedJSON } from "@model-router/telemetry";
 import { spawnCommand } from "./command.js";
 import {
   assertRootInvocation,
-  boundedOutput,
   buildDelegatedPrompt,
   sanitizeAcceptanceChecks,
   sanitizeText,
 } from "./context-security.js";
+import { runHarnessChild } from "./harness-child-process.js";
 import { discoverOpenCodeModels, type OpenCodeDiscoveryOptions } from "./opencode-cli.js";
 import { resolveTaskTimeout } from "./timeout.js";
 import {
@@ -18,7 +18,6 @@ import {
   revalidateTrustedWorkspace,
 } from "./workspace-security.js";
 
-const MAX_CAPTURE_CHARS = 64_000;
 const workspaceLocks = new Set<string>();
 
 export interface OpenCodeTaskInput {
@@ -119,19 +118,27 @@ export async function executeOpenCodeTask(
   if (input.permission === "workspace-write") workspaceLocks.add(workspaceRoot);
   try {
     await revalidateTrustedWorkspace(workspaceRoot, options.trustedRoot);
-    return await runChild(
-      spawnProcess(executable, args, {
+    return await runHarnessChild({
+      child: spawnProcess(executable, args, {
         cwd: workspaceRoot,
         env: childEnv,
         shell: false,
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
       }),
-      resolveTaskTimeout(input),
-      input.model,
-      input.reasoningEffort,
-      objective.redacted || conversation.redacted || checks.some((check) => check.redacted),
-    );
+      timeoutMs: resolveTaskTimeout(input),
+      timedOutCloseDelayMs: 0,
+      inputRedacted:
+        objective.redacted || conversation.redacted || checks.some((check) => check.redacted),
+      launchErrorPrefix: "Unable to launch OpenCode child",
+      parseOutput: parseOpenCodeOutput,
+      createResult: (result) => ({
+        harness: "opencode",
+        model: input.model,
+        reasoningEffort: input.reasoningEffort,
+        ...result,
+      }),
+    });
   } finally {
     if (input.permission === "workspace-write") workspaceLocks.delete(workspaceRoot);
   }
@@ -202,68 +209,13 @@ function trustedImageRoots(workspaceRoot: string, env: NodeJS.ProcessEnv): strin
   return roots;
 }
 
-function runChild(
-  child: ChildProcessWithoutNullStreams,
-  timeoutMs: number,
-  model: string,
-  reasoningEffort: ReasoningEffort,
-  inputRedacted: boolean,
-): Promise<OpenCodeTaskResult> {
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    let settled = false;
-    const timer = setTimeout(
-      () => {
-        timedOut = true;
-        terminateChild(child, "SIGTERM");
-        setTimeout(() => terminateChild(child, "SIGKILL"), 2_000).unref();
-      },
-      Math.max(1_000, timeoutMs),
-    );
-    timer.unref();
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      if (stdout.length < MAX_CAPTURE_CHARS)
-        stdout += chunk.slice(0, MAX_CAPTURE_CHARS - stdout.length);
-    });
-    child.stderr.on("data", (chunk: string) => {
-      if (stderr.length < MAX_CAPTURE_CHARS)
-        stderr += chunk.slice(0, MAX_CAPTURE_CHARS - stderr.length);
-    });
-    child.once("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`Unable to launch OpenCode child: ${error.message}`));
-    });
-    child.once("close", (exitCode) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      const safeOut = boundedOutput(extractOpenCodeOutput(stdout), MAX_CAPTURE_CHARS);
-      const safeErr = boundedOutput(stderr, 8_000);
-      resolve({
-        harness: "opencode",
-        model,
-        reasoningEffort,
-        output: safeOut.text,
-        stderr: safeErr.text,
-        sessionId: extractSessionId(stdout),
-        exitCode,
-        timedOut,
-        truncated: safeOut.truncated || safeErr.truncated,
-        redacted: inputRedacted || safeOut.redacted || safeErr.redacted,
-      });
-    });
-    child.stdin.end();
-  });
+export function extractOpenCodeOutput(output: string): string {
+  return parseOpenCodeOutput(output).output;
 }
 
-export function extractOpenCodeOutput(output: string): string {
+function parseOpenCodeOutput(output: string): { output: string; sessionId?: string } {
   const texts: string[] = [];
+  let sessionId: string | undefined;
   for (const line of output.split("\n")) {
     try {
       const event = parseBoundedJSON(line, 32 * 1024) as Record<string, unknown>;
@@ -275,43 +227,17 @@ export function extractOpenCodeOutput(output: string): string {
             ? part.text
             : undefined;
       if (text && (event.type === "text" || part?.type === "text")) texts.push(text);
-    } catch {
-      // Ignore non-event diagnostic lines.
-    }
-  }
-  return texts.length > 0 ? texts.join("") : output;
-}
-
-function extractSessionId(output: string): string | undefined {
-  for (const line of output.split("\n")) {
-    try {
-      const event = parseBoundedJSON(line, 32 * 1024) as Record<string, unknown>;
-      for (const value of [event.sessionID, event.sessionId, event.session_id]) {
-        if (typeof value === "string" && value.length > 0) return value;
+      if (!sessionId) {
+        for (const value of [event.sessionID, event.sessionId, event.session_id]) {
+          if (typeof value === "string" && value.length > 0) {
+            sessionId = value;
+            break;
+          }
+        }
       }
     } catch {
       // Ignore non-event diagnostic lines.
     }
   }
-  return undefined;
-}
-
-function terminateChild(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
-  if (process.platform === "win32" && child.pid) {
-    try {
-      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
-    } catch {
-      /* exited */
-    }
-    return;
-  }
-  if (process.platform !== "win32" && child.pid) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // The process may have exited between timeout and signal delivery.
-    }
-  }
-  child.kill(signal);
+  return { output: texts.length > 0 ? texts.join("") : output, sessionId };
 }

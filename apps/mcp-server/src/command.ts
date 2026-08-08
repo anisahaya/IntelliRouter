@@ -4,6 +4,14 @@ interface CaptureOptions extends NonNullable<Parameters<typeof spawn>[2]> {
   maxBuffer?: number;
 }
 
+interface CommandOptions extends CaptureOptions {
+  encoding: "utf8";
+}
+
+export interface CommandRunner {
+  execFile(file: string, args: string[], options: CommandOptions): Promise<{ stdout: string }>;
+}
+
 export function spawnCommand(
   file: string,
   args: string[],
@@ -57,3 +65,10 @@ export function captureCommand(
     });
   });
 }
+
+export const systemCommandRunner: CommandRunner = {
+  async execFile(file, args, options) {
+    const result = await captureCommand(file, args, options);
+    return { stdout: result.stdout };
+  },
+};

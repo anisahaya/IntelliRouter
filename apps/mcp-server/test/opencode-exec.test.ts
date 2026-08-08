@@ -51,7 +51,8 @@ if (args[0] === "models") {
     process.stderr.write("failed after write");
     process.exitCode = 1;
   } else {
-    process.stdout.write(JSON.stringify({type:"text",sessionID:"session-child",part:{type:"text",text:"OPENCODE_NATIVE_PASS"}}) + "\\n");
+    process.stdout.write(JSON.stringify({type:"text",sessionID:"session-child",sessionId:"ignored-session",part:{type:"text",text:"OPENCODE_"}}) + "\\n");
+    process.stdout.write(JSON.stringify({type:"text",session_id:"later-session",part:{type:"text",text:"NATIVE_PASS"}}) + "\\n");
   }
 }
 `,
@@ -65,6 +66,7 @@ describe("OpenCode native execution", () => {
     expect(extractOpenCodeOutput('{"type":"text","part":{"type":"text","text":"a"}}\nnoise')).toBe(
       "a",
     );
+    expect(extractOpenCodeOutput("raw fallback")).toBe("raw fallback");
     const state = {
       path: join(root, "success-routes.jsonl"),
       env: { ...process.env, MODEL_ROUTER_DATA_DIR: root },

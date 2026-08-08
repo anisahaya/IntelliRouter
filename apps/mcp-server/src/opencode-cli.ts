@@ -1,6 +1,6 @@
 import type { AutoCandidate, ReasoningEffort } from "@model-router/contracts";
 import { parseBoundedJSON } from "@model-router/telemetry";
-import { captureCommand } from "./command.js";
+import { type CommandRunner, systemCommandRunner } from "./command.js";
 
 const allowedEfforts = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh", "max", "ultra"]);
 
@@ -19,19 +19,7 @@ interface RawOpenCodeModel {
   variants?: unknown;
 }
 
-export interface OpenCodeCommandRunner {
-  execFile(
-    file: string,
-    args: string[],
-    options: {
-      timeout: number;
-      maxBuffer: number;
-      shell: false;
-      encoding: "utf8";
-      env: NodeJS.ProcessEnv;
-    },
-  ): Promise<{ stdout: string }>;
-}
+export interface OpenCodeCommandRunner extends CommandRunner {}
 
 export interface OpenCodeDiscoveryOptions {
   runner?: OpenCodeCommandRunner;
@@ -46,7 +34,7 @@ export async function discoverOpenCodeModels(
   const sourceEnv = options.env ?? process.env;
   const executable = options.executable ?? sourceEnv.OPENCODE_BIN ?? "opencode";
   const args = ["models", ...(options.provider ? [options.provider] : []), "--verbose"];
-  const result = await (options.runner ?? systemRunner).execFile(executable, args, {
+  const result = await (options.runner ?? systemCommandRunner).execFile(executable, args, {
     timeout: 30_000,
     maxBuffer: 16 * 1024 * 1024,
     shell: false,
@@ -176,10 +164,3 @@ function discoveryEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 function clamp(value: number): number {
   return Math.max(0, Math.min(1, Number(value.toFixed(4))));
 }
-
-const systemRunner: OpenCodeCommandRunner = {
-  async execFile(file, args, options) {
-    const result = await captureCommand(file, args, options);
-    return { stdout: result.stdout };
-  },
-};
